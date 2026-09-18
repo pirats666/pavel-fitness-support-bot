@@ -49,8 +49,14 @@ async function isAdmin(ctx: { from?: { id: number } }) {
 async function claimAdmin(ctx: { from?: { id: number } }) {
   if (!ctx.from) return false;
   if (adminId !== null) return ctx.from.id === adminId;
-  await pool.query(`INSERT INTO bot_settings (key, admin_telegram_id) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`, ['admin_telegram_id', ctx.from.id]);
-  const { rows } = await pool.query('SELECT admin_telegram_id FROM bot_settings WHERE key = $1', ['admin_telegram_id']);
+  await pool.query(
+    'INSERT INTO bot_settings (key, admin_telegram_id) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
+    ['admin_telegram_id', ctx.from.id]
+  );
+  const { rows } = await pool.query(
+    'SELECT admin_telegram_id FROM bot_settings WHERE key = $1',
+    ['admin_telegram_id']
+  );
   if (!rows[0]) return false;
   adminId = Number(rows[0].admin_telegram_id);
   return ctx.from.id === adminId;
@@ -123,11 +129,15 @@ async function getProfile(id: number) {
 }
 
 function startKeyboard() {
-  return new InlineKeyboard().text('Начать заполнение', 'quiz:start').row().text('Мой профиль', 'profile');
+  return new InlineKeyboard()
+    .text('Начать заполнение', 'quiz:start')
+    .row()
+    .text('Мой профиль', 'profile');
 }
 
 async function startQuiz(ctx: any) {
   if (!(await isAdmin(ctx))) return ctx.reply('Доступ закрыт.');
+  if (!ctx.from) return ctx.reply('Доступ закрыт.');
   sessions.set(ctx.from.id, { step: 'goal' });
   await ctx.reply('Шаг 1/6. Какая главная цель клиента?', {
     reply_markup: new InlineKeyboard()
@@ -139,7 +149,7 @@ async function startQuiz(ctx: any) {
 }
 
 bot.command('start', async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply('Доступ закрыт.');
+  if (!(await claimAdmin(ctx))) return ctx.reply('Доступ закрыт.');
   await ctx.reply(
     'Pavel Fitness Support Bot\n\nВнутренний инструмент тренера. Здесь хранится структурированный профиль для подготовки работы с клиентом.',
     { reply_markup: startKeyboard() }
@@ -147,12 +157,12 @@ bot.command('start', async (ctx) => {
 });
 
 bot.command('help', async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply('Доступ закрыт.');
+  if (!(await isAdmin(ctx))) return ctx.reply('Доступ закрыт.');
   await ctx.reply('/start — главное меню\n/profile — сохранённый профиль\n/reset — начать анкету заново');
 });
 
 bot.command('profile', async (ctx) => {
-  if (!isAdmin(ctx) || !ctx.from) return ctx.reply('Доступ закрыт.');
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.reply('Доступ закрыт.');
   const profile = await getProfile(ctx.from.id);
   if (!profile) return ctx.reply('Профиль пока не заполнен. Нажми /start.');
   await ctx.reply(
@@ -170,7 +180,7 @@ bot.command('profile', async (ctx) => {
 bot.command('reset', startQuiz);
 
 bot.callbackQuery('profile', async (ctx) => {
-  if (!isAdmin(ctx) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   await ctx.answerCallbackQuery();
   const profile = await getProfile(ctx.from.id);
   if (!profile) return ctx.reply('Профиль пока не заполнен. Нажми /start.');
@@ -192,7 +202,7 @@ bot.callbackQuery('quiz:start', async (ctx) => {
 });
 
 bot.callbackQuery(/^goal:(.+)$/, async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const value = ctx.match[1];
   sessions.set(ctx.from.id, { step: 'experience', goal: value });
@@ -208,7 +218,7 @@ bot.callbackQuery(/^goal:(.+)$/, async (ctx) => {
 });
 
 bot.callbackQuery(/^exp:(.+)$/, async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const session = sessions.get(ctx.from.id);
   if (!session) return startQuiz(ctx);
@@ -226,7 +236,7 @@ bot.callbackQuery(/^exp:(.+)$/, async (ctx) => {
 });
 
 bot.callbackQuery(/^loc:(.+)$/, async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const session = sessions.get(ctx.from.id);
   if (!session) return startQuiz(ctx);
@@ -241,7 +251,7 @@ bot.callbackQuery(/^loc:(.+)$/, async (ctx) => {
 });
 
 bot.callbackQuery(/^wk:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const session = sessions.get(ctx.from.id);
   if (!session) return startQuiz(ctx);
@@ -256,7 +266,7 @@ bot.callbackQuery(/^wk:(\d+)$/, async (ctx) => {
 });
 
 bot.callbackQuery(/^dur:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const session = sessions.get(ctx.from.id);
   if (!session) return startQuiz(ctx);
@@ -267,8 +277,8 @@ bot.callbackQuery(/^dur:(\d+)$/, async (ctx) => {
 });
 
 bot.on('message:text', async (ctx) => {
-  if (!isAdmin(ctx)) return;
-  if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!(await isAdmin(ctx))) return;
+  if (!ctx.from) return;
   const session = sessions.get(ctx.from.id);
   if (!session || session.step !== 'limitations') return;
   const limitations = ctx.message.text.trim();
