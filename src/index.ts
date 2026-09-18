@@ -81,6 +81,7 @@ type Program = {
 const sessions = new Map<number, QuizState>();
 const correctionSessions = new Map<number, { programId: number }>();
 const paymentSessions = new Map<number, { step: 'amount' | 'total' | 'remaining'; amount?: number; total?: number }>();
+const clientSearchSessions = new Map<number, { query?: string }>();
 let adminId: number | null = configuredAdminId;
 
 async function isAdmin(ctx: { from?: { id: number } }) {
@@ -819,7 +820,7 @@ async function sendAdminPanel(ctx: any) {
       .row()
       .text('💳 Оплата и тренировки', 'payment:open')
       .row()
-      .text('👥 Последние анкеты', 'admin:profiles')
+      .text('👥 Клиенты', 'admin:profiles')
       .row()
       .text('🏋️ Текущая программа', 'program:current')
       .row()
@@ -849,6 +850,33 @@ async function getRecentProfiles() {
     FROM trainer_profiles ORDER BY updated_at DESC LIMIT 20
   `);
   return rows;
+}
+
+async function searchClients(query: string) {
+  const q = query.trim().replace(/^@/, '');
+  if (!q) return [];
+  const { rows } = await pool.query(
+    `SELECT telegram_user_id, telegram_username, first_name, goal, experience, location,
+            workouts_per_week, workout_duration, payment_amount, training_sessions_total,
+            training_sessions_remaining, updated_at
+     FROM trainer_profiles
+     WHERE LOWER(COALESCE(telegram_username, '')) LIKE LOWER($1)
+        OR LOWER(COALESCE(first_name, '')) LIKE LOWER($1)
+        OR CAST(telegram_user_id AS TEXT) = $2
+     ORDER BY updated_at DESC
+     LIMIT 20`,
+    [`%${q}%`, q]
+  );
+  return rows;
+}
+
+function clientSummary(p: any, index?: number) {
+  const prefix = index === undefined ? '' : `${index}. `;
+  return `${prefix}<b>${displayUsername(p)}</b>
+🆔 <code>${p.telegram_user_id}</code>
+🎯 ${ruGoal(p.goal)} · 📚 ${ruExperience(p.experience)} · 📍 ${ruLocation(p.location)}
+🏋️ ${Number(p.training_sessions_total)} всего · ⏳ ${Number(p.training_sessions_remaining)} осталось
+💳 ${formatMoney(Number(p.payment_amount))}`;
 }
 
 async function getProgramHistory(userId: number) {
@@ -955,15 +983,30 @@ bot.callbackQuery('admin:stats', async (ctx) => {
 });
 
 bot.callbackQuery('admin:profiles', async (ctx) => {
-  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  clientSearchSessions.set(ctx.from.id, {});
   await ctx.answerCallbackQuery();
   const profiles = await getRecentProfiles();
-  if (!profiles.length) return ctx.reply('Анкет пока нет.');
-  const text = profiles.map((p: any, i: number) => {
-    const name = p.telegram_username ? `@${p.telegram_username}` : p.first_name;
-    return `${i + 1}. ${name}\nЦель: ${ruGoal(p.goal)}\nОпыт: ${ruExperience(p.experience)}\nМесто: ${ruLocation(p.location)}\n${p.workouts_per_week} трен./нед. × ${p.workout_duration} мин.`;
-  }).join('\n\n');
-  await ctx.reply(`👥 Последние анкеты\n\n${text}`);
+  const text = profiles.length
+    ? profiles.map((p: any, i: number) => clientSummary(p, i + 1)).join('\n\n')
+    : 'Клиентов пока нет.';
+  await ctx.reply(`👥 <b>Клиенты</b>
+
+🔎 Чтобы найти клиента, напиши его <b>username</b>, имя или Telegram ID.
+
+Последние клиенты:
+
+${text}`, {
+    parse_mode: 'HTML',
+    reply_markup: new InlineKeyboard().text('🔎 Новый поиск', 'admin:search').row().text('⬅️ Админ-панель', 'admin:open')
+  });
+});
+
+bot.callbackQuery('admin:search', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  clientSearchSessions.set(ctx.from.id, { query: '' });
+  await ctx.answerCallbackQuery();
+  await ctx.reply('🔎 Введи username (например @ivan), имя или Telegram ID клиента.');
 });
 
 bot.callbackQuery('payment:open', async (ctx) => {
@@ -1099,6 +1142,27 @@ bot.callbackQuery(/^dur:(\d+)$/, async (ctx) => {
 
 bot.on('message:text', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return;
+  const searchSession = clientSearchSessions.get(ctx.from.id);
+  if (searchSession) {
+    const query = ctx.message.text.trim();
+    clientSearchSessions.delete(ctx.from.id);
+    const profiles = await searchClients(query);
+    if (!profiles.length) {
+      return ctx.reply(`🔎 По запросу «${query}» ничего не найдено.`, {
+        reply_markup: new InlineKeyboard().text('🔎 Попробовать снова', 'admin:search').row().text('⬅️ Админ-панель', 'admin:open')
+      });
+    }
+    const text = profiles.map((p: any, i: number) => clientSummary(p, i + 1)).join('\n\n');
+    return ctx.reply(`🔎 <b>Результаты поиска</b>
+
+${text}
+
+Для работы с конкретным клиентом используй его Telegram ID.`, {
+      parse_mode: 'HTML',
+      reply_markup: new InlineKeyboard().text('🔎 Новый поиск', 'admin:search').row().text('⬅️ Клиенты', 'admin:profiles')
+    });
+  }
+
   const payment = paymentSessions.get(ctx.from.id);
   if (payment) {
     const raw = ctx.message.text.trim().replace(',', '.');
