@@ -197,9 +197,6 @@ async function ensureDatabase() {
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_total INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_remaining INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS gif_url TEXT NOT NULL DEFAULT '';
-    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT '';
-
     CREATE TABLE IF NOT EXISTS bot_settings (
       key TEXT PRIMARY KEY,
       admin_telegram_id BIGINT NOT NULL
@@ -235,6 +232,8 @@ async function ensureDatabase() {
     CREATE INDEX IF NOT EXISTS exercise_library_equipment_idx ON exercise_library (equipment);
     CREATE INDEX IF NOT EXISTS exercise_library_category_idx ON exercise_library (category);
     CREATE INDEX IF NOT EXISTS exercise_library_target_idx ON exercise_library (target);
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS gif_url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT '';
   `);
 }
 
@@ -397,8 +396,7 @@ function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desired
   if (row.category === desiredCategory) score += 30;
 
   // 2) Goal changes the priority of exercise types and volume later.
-  if (profile.goal === 'mass') {
-    if (/(chest|pector|back|lat|dorsi|quadr|hamstring|glute|deltoid|shoulder)/.test(text)) score += 8;
+  if (profile.goal === 'mass') {    if (/(chest|pector|back|lat|dorsi|quadr|hamstring|glute|deltoid|shoulder)/.test(text)) score += 8;
     if (/(isolation|curl|extension|raise|fly)/.test(text)) score += 2;
   } else if (profile.goal === 'loss') {
     if (/(squat|lunge|row|push|press|pull|deadlift|carry)/.test(text)) score += 6;
@@ -797,8 +795,7 @@ function programText(program: Program) {
     ''
   ];
 
-  for (const day of program.days) {
-    parts.push(
+  for (const day of program.days) {    parts.push(
       '',
       '━━━━━━━━━━━━━━',
       '',
@@ -1197,8 +1194,7 @@ bot.callbackQuery('client:delete', async (ctx) => {
   selectedClient.delete(ctx.from.id);
   clientSearchSessions.delete(ctx.from.id);
   quizTargets.delete(ctx.from.id);
-  paymentSessions.delete(ctx.from.id);
-  measurementSessions.delete(ctx.from.id);
+  paymentSessions.delete(ctx.from.id);  measurementSessions.delete(ctx.from.id);
   correctionSessions.delete(ctx.from.id);
   await ctx.reply('🗑 <b>Клиент удалён.</b>', { parse_mode: 'HTML', reply_markup: new InlineKeyboard()
     .text('👥 Клиенты', 'admin:profiles')
@@ -1597,8 +1593,7 @@ ${text}
     const created = await createProgram(targetId);
     if (!created) return ctx.reply('Профиль сохранён, но программу создать не удалось.');
     await ctx.reply('Профиль сохранён ✅\n\nПрограмма составлена автоматически. Ниже — первая версия.');
-    const targetProfile = await getProfile(targetId);
-    await sendProgramMedia(ctx, created.program, programKeyboard(created.id));
+    const targetProfile = await getProfile(targetId);    await sendProgramMedia(ctx, created.program, programKeyboard(created.id));
   } catch (error) {
     console.error('save profile/program error', error);
     await ctx.reply('Не удалось сохранить профиль или программу. Проверь подключение базы данных.');
