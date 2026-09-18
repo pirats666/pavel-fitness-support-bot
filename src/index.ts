@@ -755,7 +755,17 @@ function resolveGifUrl(gifUrl?: string) {
 async function sendProgramText(ctx: any, text: string, replyMarkup?: InlineKeyboard) {
   const limit = 3500;
   const chunks: string[] = [];
-  for (let i = 0; i < text.length; i += limit) chunks.push(text.slice(i, i + limit));
+  let current = '';
+  for (const line of text.split('\\n')) {
+    const candidate = current ? current + '\\n' + line : line;
+    if (current && candidate.length > limit) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) chunks.push(current);
   for (let i = 0; i < chunks.length; i++) {
     const options = { parse_mode: 'HTML' as const, ...(i === chunks.length - 1 && replyMarkup ? { reply_markup: replyMarkup } : {}) };
     await ctx.reply(chunks[i], options);
@@ -1578,7 +1588,12 @@ ${text}
     await sendProgramMedia(ctx, created.program, programKeyboard(created.id));
   } catch (error) {
     console.error('save profile/program error', error);
-    await ctx.reply('Не удалось сохранить профиль или программу. Проверь подключение базы данных.');
+    const message = String((error as any)?.message ?? '');
+    if (/can't parse entities|Bad Request/i.test(message)) {
+      await ctx.reply('⚠️ Программа сохранена, но Telegram не принял формат сообщения. Исправление уже внесено — повтори создание программы.');
+    } else {
+      await ctx.reply('Не удалось сохранить профиль или программу. Проверь подключение базы данных.');
+    }
   }
 });
 
