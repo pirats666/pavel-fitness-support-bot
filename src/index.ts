@@ -553,51 +553,6 @@ function buildExercises(location: string, goal: string, version: number): Exerci
   return base.map((e) => ({ ...e, comment: goal === 'mass' ? 'Оставлять 1–3 повторения в запасе; при выполнении верхней границы повторений постепенно повышать нагрузку.' : undefined }));
 }
 
-async function buildProgram(profile: any, version: number, correction = ''): Promise<Program> {
-  const frequency = Math.min(Math.max(Number(profile.workouts_per_week), 1), 5);
-  const duration = Number(profile.workout_duration);
-  const daysCount = frequency;
-  const libraryExercises = await getLibraryExercises(profile.location, profile.goal, version);
-  const exercises = libraryExercises.length ? libraryExercises : buildExercises(profile.location, profile.goal, version);
-  const focus = ['Ноги и жимовые движения', 'Спина и задняя цепь', 'Полное тело'];
-  const days: WorkoutDay[] = Array.from({ length: daysCount }, (_, i) => {
-    const dayExercises = exercises.map((e, idx) => ({
-      ...e,
-      sets: Math.max(2, e.sets - (duration <= 45 && idx > 3 ? 1 : 0))
-    }));
-    if (version > 1 && i === 0 && correction.includes('легче')) {
-      dayExercises.forEach((e) => { e.sets = Math.max(2, e.sets - 1); });
-    }
-    if (version > 1 && i === 0 && correction.includes('интенсивнее')) {
-      dayExercises.forEach((e) => { e.reps = e.reps.replace('8–12', '10–15'); });
-    }
-    return {
-      day: i + 1,
-      title: `Тренировка ${i + 1}`,
-      focus: focus[i % focus.length],
-      warmup: duration <= 45 ? '5–7 минут: суставная разминка + лёгкая общая активность.' : '8–10 минут: суставная разминка + лёгкая общая активность.',
-      exercises: dayExercises,
-      cooldown: '3–5 минут спокойного восстановления и лёгкой подвижности.'
-    };
-  });
-  return {
-    title: `Программа: ${ruGoal(profile.goal)}`,
-    goal: ruGoal(profile.goal),
-    frequency,
-    duration,
-    location: ruLocation(profile.location),
-    version,
-    weeks: 4,
-    progression: 'Работать с контролируемой техникой. Если все подходы выполнены в верхней границе повторений без ухудшения техники, постепенно увеличить нагрузку на следующей тренировке.',
-    days,
-    notes: [
-      'Перед началом учитывать ограничения, указанные в анкете.',
-      'Не выполнять упражнение через боль; при необходимости заменить его тренером.',
-      profile.limitations && profile.limitations.toLowerCase() !== 'нет' ? `Ограничения: ${profile.limitations}` : 'Ограничений в анкете не указано.',
-      correction ? `Учтена коррекция: ${correction}` : 'Программа сформирована по исходной анкете.'
-    ]
-  };
-}
 
 async function createProgram(userId: number, correction = '') {
   const profile = await getProfile(userId);
