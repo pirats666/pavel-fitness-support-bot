@@ -1671,7 +1671,21 @@ async function main() {
   server.listen(PORT, () => console.log(`Health server listening on :${PORT}`));
   await bot.api.deleteWebhook({ drop_pending_updates: false });
   console.log('Starting Telegram long polling...');
-  await bot.start({ onStart: (info) => console.log(`Bot @${info.username} started`) });
+
+  while (true) {
+    try {
+      await bot.start({ onStart: (info) => console.log(`Bot @${info.username} started`) });
+      break;
+    } catch (error: any) {
+      const description = String(error?.description ?? error?.message ?? error);
+      if (description.includes('409') || description.includes('getUpdates')) {
+        console.warn('Telegram polling conflict during deploy/restart; retrying in 5 seconds...');
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 main().catch((error) => {
