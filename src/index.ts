@@ -1154,8 +1154,10 @@ bot.callbackQuery('measurements:add', async (ctx) => {
 
 Пример: <code>82.5, 104, 86, 100, 38, 58, 18</code>
 
-Если какой-то показатель не измерялся — поставь <code>-</code>.`, { parse_mode: 'HTML' });
+Если сейчас замеры сделать нельзя — нажми «⏭ Пропустить».\nЕсли какой-то показатель не измерялся — поставь <code>-</code>.`, { parse_mode: 'HTML', reply_markup: new InlineKeyboard().text('⏭ Пропустить', 'measurements:skip') });
 });
+
+bot.callbackQuery('measurements:skip', async (ctx) => { if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' }); measurementSessions.delete(ctx.from.id); await ctx.answerCallbackQuery({ text: 'Замеры пропущены.' }); await ctx.reply('⏭ Замеры пропущены. Их можно добавить позже в карточке клиента.', { reply_markup: new InlineKeyboard().text('📐 Замеры', 'client:measurements').row().text('⬅️ Карточка клиента', 'admin:profiles') }); });
 
 bot.callbackQuery('measurements:history', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
