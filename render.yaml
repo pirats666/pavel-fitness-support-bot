@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: pavel-fitness-support
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_TELEGRAM_ID
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: PORT
+        value: "10000"
