@@ -217,10 +217,10 @@ bot.command('profile', async (ctx) => {
   const profile = await getProfile(ctx.from.id);
   if (!profile) return ctx.reply('Профиль пока не заполнен. Нажми /start.');
   await ctx.reply(
-    `Профиль тренера/клиента
-Цель: ${profile.goal}
-Опыт: ${profile.experience}
-Место: ${profile.location}
+    `Профиль
+Цель: ${ruGoal(profile.goal)}
+Опыт: ${ruExperience(profile.experience)}
+Место: ${ruLocation(profile.location)}
 Тренировок в неделю: ${profile.workouts_per_week}
 Длительность: ${profile.workout_duration} мин
 Ограничения: ${profile.limitations || 'нет'}
@@ -237,9 +237,9 @@ bot.callbackQuery('profile', async (ctx) => {
   if (!profile) return ctx.reply('Профиль пока не заполнен. Нажми /start.');
   await ctx.reply(
     `Профиль
-Цель: ${profile.goal}
-Опыт: ${profile.experience}
-Место: ${profile.location}
+Цель: ${ruGoal(profile.goal)}
+Опыт: ${ruExperience(profile.experience)}
+Место: ${ruLocation(profile.location)}
 Тренировок в неделю: ${profile.workouts_per_week}
 Длительность: ${profile.workout_duration} мин
 Ограничения: ${profile.limitations || 'нет'}`
