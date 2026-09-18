@@ -130,7 +130,7 @@ bot.command('help', async (ctx) => {
 });
 
 bot.command('profile', async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply('Доступ закрыт.');
+  if (!isAdmin(ctx) || !ctx.from) return ctx.reply('Доступ закрыт.');
   const profile = await getProfile(ctx.from.id);
   if (!profile) return ctx.reply('Профиль пока не заполнен. Нажми /start.');
   await ctx.reply(
@@ -148,7 +148,7 @@ bot.command('profile', async (ctx) => {
 bot.command('reset', startQuiz);
 
 bot.callbackQuery('profile', async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!isAdmin(ctx) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   await ctx.answerCallbackQuery();
   const profile = await getProfile(ctx.from.id);
   if (!profile) return ctx.reply('Профиль пока не заполнен. Нажми /start.');
@@ -164,12 +164,14 @@ bot.callbackQuery('profile', async (ctx) => {
 });
 
 bot.callbackQuery('quiz:start', async (ctx) => {
+  if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   await ctx.answerCallbackQuery();
   await startQuiz(ctx);
 });
 
 bot.callbackQuery(/^goal:(.+)$/, async (ctx) => {
   if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const value = ctx.match[1];
   sessions.set(ctx.from.id, { step: 'experience', goal: value });
   await ctx.answerCallbackQuery();
@@ -185,6 +187,7 @@ bot.callbackQuery(/^goal:(.+)$/, async (ctx) => {
 
 bot.callbackQuery(/^exp:(.+)$/, async (ctx) => {
   if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const session = sessions.get(ctx.from.id);
   if (!session) return startQuiz(ctx);
   session.experience = ctx.match[1];
@@ -202,6 +205,7 @@ bot.callbackQuery(/^exp:(.+)$/, async (ctx) => {
 
 bot.callbackQuery(/^loc:(.+)$/, async (ctx) => {
   if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const session = sessions.get(ctx.from.id);
   if (!session) return startQuiz(ctx);
   session.location = ctx.match[1];
@@ -216,6 +220,7 @@ bot.callbackQuery(/^loc:(.+)$/, async (ctx) => {
 
 bot.callbackQuery(/^wk:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const session = sessions.get(ctx.from.id);
   if (!session) return startQuiz(ctx);
   session.workoutsPerWeek = Number(ctx.match[1]);
@@ -230,6 +235,7 @@ bot.callbackQuery(/^wk:(\d+)$/, async (ctx) => {
 
 bot.callbackQuery(/^dur:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const session = sessions.get(ctx.from.id);
   if (!session) return startQuiz(ctx);
   session.workoutDuration = Number(ctx.match[1]);
@@ -240,6 +246,7 @@ bot.callbackQuery(/^dur:(\d+)$/, async (ctx) => {
 
 bot.on('message:text', async (ctx) => {
   if (!isAdmin(ctx)) return;
+  if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const session = sessions.get(ctx.from.id);
   if (!session || session.step !== 'limitations') return;
   const limitations = ctx.message.text.trim();
