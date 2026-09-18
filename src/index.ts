@@ -1856,7 +1856,7 @@ bot.callbackQuery('admin:search', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   clientSearchSessions.set(ctx.from.id, { query: '' });
   await ctx.answerCallbackQuery();
-  await ctx.reply('🔎 Введи username (например @ivan), имя или Telegram ID клиента.');
+  await ctx.reply('🔎 Введи username (например @ivan), имя или внутренний ID клиента.');
 });
 
 bot.callbackQuery(/^client:select:(-?\d+)$/, async (ctx) => {
@@ -1915,9 +1915,10 @@ bot.callbackQuery('client:program', async (ctx) => {
 
 bot.callbackQuery('client:payment', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  paymentSessions.set(ctx.from.id, { step: 'telegramId' });
+  const targetId = selectedClient.get(ctx.from.id);
+  if (!targetId) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
   await ctx.answerCallbackQuery();
-  await ctx.reply('🆔 <b>Оплата клиента</b>\n\nСначала введи Telegram ID клиента. После этого продолжим заполнение оплаты.', { parse_mode: 'HTML' });
+  return sendPaymentPanel(ctx, targetId);
 });
 
 bot.callbackQuery('client:training', async (ctx) => {
@@ -2054,9 +2055,15 @@ bot.callbackQuery('client:correct', async (ctx) => {
 
 bot.callbackQuery('payment:open', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  paymentSessions.set(ctx.from.id, { step: 'telegramId' });
+  const targetId = selectedClient.get(ctx.from.id);
+  if (!targetId) {
+    await ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+    return ctx.reply('👥 Сначала выбери клиента в разделе «Клиенты».', {
+      reply_markup: new InlineKeyboard().text('👥 Выбрать клиента', 'admin:profiles')
+    });
+  }
   await ctx.answerCallbackQuery();
-  await ctx.reply('🆔 <b>Оплата</b>\n\nСначала введи Telegram ID клиента. После этого бот покажет его оплату и предложит заполнить сумму и количество тренировок.', { parse_mode: 'HTML' });
+  return sendPaymentPanel(ctx, targetId);
 });
 
 bot.callbackQuery('payment:edit', async (ctx) => {
@@ -2322,31 +2329,6 @@ ${text}
   const payment = paymentSessions.get(ctx.from.id);
   if (payment) {
     const rawText = ctx.message.text.trim();
-    if (payment.step === 'telegramId') {
-      const telegramId = Number(rawText);
-      if (!Number.isInteger(telegramId) || telegramId <= 0) return ctx.reply('Введи корректный Telegram ID — только целое положительное число.');
-      const client = await pool.query(
-        `SELECT c.id, c.telegram_id, c.telegram_username, c.first_name
-         FROM clients c WHERE c.telegram_id = $1 LIMIT 1`,
-        [telegramId]
-      );
-      let targetId: number | null = null;
-      if (client.rows[0]) targetId = -Number(client.rows[0].id);
-      else {
-        const profile = await getProfile(telegramId);
-        if (profile) targetId = telegramId;
-      }
-      if (!targetId) {
-        paymentSessions.delete(ctx.from.id);
-        return ctx.reply('Клиент с таким Telegram ID не найден. Сначала добавь клиента и укажи его Telegram ID.');
-      }
-      payment.targetId = targetId;
-      payment.step = 'amount';
-      await ctx.reply(`👤 Клиент найден: @${client.rows[0]?.telegram_username ?? '—'}
-
-💰 Введи сумму оплаты в рублях. Например: 15000`);
-      return;
-    }
     const value = Number(rawText.replace(',', '.'));
     if (!Number.isFinite(value) || value < 0) return ctx.reply('Введи корректное число.');
     if (payment.step === 'amount') {
