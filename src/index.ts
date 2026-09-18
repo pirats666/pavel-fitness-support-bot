@@ -119,6 +119,17 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value) + ' ₽';
 }
 
+function displayUsername(profile: any) {
+  const username = String(profile?.telegram_username ?? '').trim();
+  const firstName = String(profile?.first_name ?? '').trim();
+  const person = firstName || 'Пользователь';
+  return username ? `${person} (@${username.replace(/^@/, '')})` : person;
+}
+
+function identityBlock(profile: any) {
+  return `👤 <b>${displayUsername(profile)}</b>\n🆔 Telegram ID: <code>${profile?.telegram_user_id ?? '—'}</code>`;
+}
+
 async function ensureDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS trainer_profiles (
@@ -591,9 +602,12 @@ async function updatePaymentInfo(userId: number, amount: number, total: number, 
 
 async function sendPaymentPanel(ctx: any) {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.reply('Доступ закрыт.');
+  const profile = await getProfile(ctx.from.id);
   const p = await getPaymentInfo(ctx.from.id);
   await ctx.reply(
-    `💳 <b>Оплата и тренировки</b>
+    `${identityBlock(profile)}
+
+💳 <b>Оплата и тренировки</b>
 
 💰 Оплачено: <b>${formatMoney(Number(p.payment_amount))}</b>
 🏋️ Всего тренировок: <b>${Number(p.training_sessions_total)}</b>
@@ -763,13 +777,14 @@ function programKeyboard(programId: number, status = 'draft') {
 
 async function sendCurrentProgram(ctx: any) {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.reply('Доступ закрыт.');
+  const profile = await getProfile(ctx.from.id);
   const current = await getCurrentProgram(ctx.from.id);
   if (!current) {
     const created = await createProgram(ctx.from.id);
     if (!created) return ctx.reply('Сначала заполните профиль.');
-    return sendProgramText(ctx, programText(created.program), programKeyboard(created.id));
+    return sendProgramText(ctx, `${identityBlock(profile)}\n\n${programText(created.program)}`, programKeyboard(created.id));
   }
-  await sendProgramText(ctx, programText(current.program), programKeyboard(Number(current.id), current.status));
+  await sendProgramText(ctx, `${identityBlock(profile)}\n\n${programText(current.program)}`, programKeyboard(Number(current.id), current.status));
 }
 
 async function startQuiz(ctx: any) {
@@ -829,8 +844,9 @@ async function getAdminStats() {
 
 async function getRecentProfiles() {
   const { rows } = await pool.query(`
-    SELECT telegram_username, first_name, goal, experience, location, workouts_per_week, workout_duration, updated_at
-    FROM trainer_profiles ORDER BY updated_at DESC LIMIT 10
+    SELECT telegram_user_id, telegram_username, first_name, goal, experience, location, workouts_per_week, workout_duration,
+           payment_amount, training_sessions_total, training_sessions_remaining, updated_at
+    FROM trainer_profiles ORDER BY updated_at DESC LIMIT 20
   `);
   return rows;
 }
@@ -863,7 +879,9 @@ bot.command('profile', async (ctx) => {
   if (!profile) return ctx.reply('Профиль пока не заполнен. Нажми /start.');
   const payment = await getPaymentInfo(ctx.from.id);
   await ctx.reply(
-    `Профиль
+    `${identityBlock(profile)}
+
+Профиль
 Цель: ${ruGoal(profile.goal)}
 Опыт: ${ruExperience(profile.experience)}
 Место: ${ruLocation(profile.location)}
