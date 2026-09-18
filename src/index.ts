@@ -128,37 +128,88 @@ async function getProfile(id: number) {
   return rows[0] ?? null;
 }
 
-function startKeyboard() {
-  return new InlineKeyboard()
-    .text('Начать заполнение', 'quiz:start')
+async function startKeyboard() {
+  const keyboard = new InlineKeyboard()
+    .text('📝 Заполнить анкету', 'quiz:start')
     .row()
-    .text('Мой профиль', 'profile');
+    .text('👤 Мой профиль', 'profile');
+  if (adminId !== null) keyboard.row().text('🛠 Админ-панель', 'admin:open');
+  return keyboard;
+}
+
+async function sendAdminPanel(ctx: any) {
+  if (!(await isAdmin(ctx))) return ctx.reply('Доступ закрыт.');
+  await ctx.reply('🛠 Админ-панель\n\nУправление внутренними данными тренера.', {
+    reply_markup: new InlineKeyboard()
+      .text('📊 Статистика', 'admin:stats')
+      .row()
+      .text('👥 Последние анкеты', 'admin:profiles')
+      .row()
+      .text('📝 Заполнить анкету', 'quiz:start')
+      .text('👤 Мой профиль', 'profile')
+  });
+}
+
+async function getAdminStats() {
+  const { rows } = await pool.query(`
+    SELECT
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE goal = 'loss')::int AS loss,
+      COUNT(*) FILTER (WHERE goal = 'mass')::int AS mass,
+      COUNT(*) FILTER (WHERE goal = 'health')::int AS health
+    FROM trainer_profiles
+  `);
+  return rows[0] ?? { total: 0, loss: 0, mass: 0, health: 0 };
+}
+
+async function getRecentProfiles() {
+  const { rows } = await pool.query(`
+    SELECT telegram_username, first_name, goal, experience, location, workouts_per_week, workout_duration, updated_at
+    FROM trainer_profiles
+    ORDER BY updated_at DESC
+    LIMIT 10
+  `);
+  return rows;
+}
+
+function ruGoal(value: string) {
+  return ({ loss: 'Похудение', mass: 'Набор массы', health: 'Здоровье и форма' } as Record<string, string>)[value] ?? value;
+}
+function ruExperience(value: string) {
+  return ({ beginner: 'Новичок', under1: 'До 1 года', '1to3': '1–3 года', '3plus': '3+ года' } as Record<string, string>)[value] ?? value;
+}
+function ruLocation(value: string) {
+  return ({ gym: 'Зал', home: 'Дом', outdoor: 'Улица', mixed: 'Смешанный формат' } as Record<string, string>)[value] ?? value;
 }
 
 async function startQuiz(ctx: any) {
   if (!(await isAdmin(ctx))) return ctx.reply('Доступ закрыт.');
   if (!ctx.from) return ctx.reply('Доступ закрыт.');
   sessions.set(ctx.from.id, { step: 'goal' });
-  await ctx.reply('Шаг 1/6. Какая главная цель клиента?', {
+  await ctx.reply('Шаг 1/6. Какая главная цель?', {
     reply_markup: new InlineKeyboard()
       .text('Похудение', 'goal:loss')
       .text('Набор массы', 'goal:mass')
       .row()
-      .text('Здоровье / форма', 'goal:health')
+      .text('Здоровье и форма', 'goal:health')
   });
 }
 
 bot.command('start', async (ctx) => {
   if (!(await claimAdmin(ctx))) return ctx.reply('Доступ закрыт.');
   await ctx.reply(
-    'Pavel Fitness Support Bot\n\nВнутренний инструмент тренера. Здесь хранится структурированный профиль для подготовки работы с клиентом.',
-    { reply_markup: startKeyboard() }
+    'Pavel Fitness Support Bot\n\nВнутренний инструмент тренера. Здесь хранится структурированный профиль для работы с клиентами.',
+    { reply_markup: await startKeyboard() }
   );
+});
+
+bot.command('admin', async (ctx) => {
+  await sendAdminPanel(ctx);
 });
 
 bot.command('help', async (ctx) => {
   if (!(await isAdmin(ctx))) return ctx.reply('Доступ закрыт.');
-  await ctx.reply('/start — главное меню\n/profile — сохранённый профиль\n/reset — начать анкету заново');
+  await ctx.reply('/start — главное меню\n/admin — админ-панель\n/profile — сохранённый профиль\n/reset — начать анкету заново');
 });
 
 bot.command('profile', async (ctx) => {
@@ -193,6 +244,31 @@ bot.callbackQuery('profile', async (ctx) => {
 Длительность: ${profile.workout_duration} мин
 Ограничения: ${profile.limitations || 'нет'}`
   );
+});
+
+bot.callbackQuery('admin:open', async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  await ctx.answerCallbackQuery();
+  await sendAdminPanel(ctx);
+});
+
+bot.callbackQuery('admin:stats', async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  await ctx.answerCallbackQuery();
+  const stats = await getAdminStats();
+  await ctx.reply(`📊 Статистика\n\nВсего анкет: ${stats.total}\nПохудение: ${stats.loss}\nНабор массы: ${stats.mass}\nЗдоровье и форма: ${stats.health}`);
+});
+
+bot.callbackQuery('admin:profiles', async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  await ctx.answerCallbackQuery();
+  const profiles = await getRecentProfiles();
+  if (!profiles.length) return ctx.reply('Анкет пока нет.');
+  const text = profiles.map((p: any, i: number) => {
+    const name = p.telegram_username ? `@${p.telegram_username}` : p.first_name;
+    return `${i + 1}. ${name}\nЦель: ${ruGoal(p.goal)}\nОпыт: ${ruExperience(p.experience)}\nМесто: ${ruLocation(p.location)}\n${p.workouts_per_week} трен./нед. × ${p.workout_duration} мин.`;
+  }).join('\n\n');
+  await ctx.reply(`👥 Последние анкеты\n\n${text}`);
 });
 
 bot.callbackQuery('quiz:start', async (ctx) => {
