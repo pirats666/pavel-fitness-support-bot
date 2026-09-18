@@ -83,7 +83,8 @@ const correctionSessions = new Map<number, { programId: number }>();
 const paymentSessions = new Map<number, { step: 'amount' | 'total' | 'remaining'; amount?: number; total?: number; targetId?: number }>();
 const clientSearchSessions = new Map<number, { query?: string }>();
 const selectedClient = new Map<number, number>();
-const clientAddSessions = new Map<number, { step: 'id' | 'username'; id?: number }>();
+const clientAddSessions = new Map<number, { step: 'username' | 'name'; username?: string }>();
+const measurementSessions = new Map<number, { step: 'data'; targetId: number }>();
 const quizTargets = new Map<number, number>();
 let adminId: number | null = configuredAdminId;
 
@@ -131,7 +132,9 @@ function displayUsername(profile: any) {
 }
 
 function identityBlock(profile: any) {
-  return `👤 <b>${displayUsername(profile)}</b>\n🆔 Telegram ID: <code>${profile?.telegram_user_id ?? '—'}</code>`;
+  const id = Number(profile?.telegram_user_id ?? 0);
+  const idLine = id < 0 ? `🆔 ID клиента: <code>${Math.abs(id)}</code>` : `🆔 Telegram ID: <code>${profile?.telegram_user_id ?? '—'}</code>`;
+  return `👤 <b>${displayUsername(profile)}</b>\n${idLine}`;
 }
 
 async function ensureDatabase() {
@@ -163,6 +166,29 @@ async function ensureDatabase() {
       note TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS clients (
+      id BIGSERIAL PRIMARY KEY,
+      telegram_username TEXT NOT NULL,
+      first_name TEXT NOT NULL DEFAULT 'Клиент',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS clients_username_unique_idx ON clients (LOWER(telegram_username));
+
+    CREATE TABLE IF NOT EXISTS measurements (
+      id BIGSERIAL PRIMARY KEY,
+      telegram_user_id BIGINT NOT NULL REFERENCES trainer_profiles(telegram_user_id) ON DELETE CASCADE,
+      weight_kg NUMERIC(6,2),
+      chest_cm NUMERIC(6,2),
+      waist_cm NUMERIC(6,2),
+      hips_cm NUMERIC(6,2),
+      arm_cm NUMERIC(6,2),
+      thigh_cm NUMERIC(6,2),
+      body_fat_pct NUMERIC(5,2),
+      note TEXT NOT NULL DEFAULT '',
+      measured_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS measurements_user_date_idx ON measurements (telegram_user_id, measured_at DESC);
     CREATE INDEX IF NOT EXISTS payment_history_user_created_idx ON payment_history (telegram_user_id, created_at DESC);
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_total INTEGER NOT NULL DEFAULT 0;
@@ -606,7 +632,8 @@ async function updatePaymentInfo(userId: number, amount: number, total: number, 
 
 async function sendPaymentPanel(ctx: any, targetId?: number) {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.reply('Доступ закрыт.');
-  const userId = targetId ?? selectedClient.get(ctx.from.id) ?? ctx.from.id;
+  const userId = targetId ?? selectedClient.get(ctx.from.id);
+  if (!userId) return ctx.reply('Сначала выбери клиента.');
   const profile = await getProfile(userId);
   const p = await getPaymentInfo(userId);
   await ctx.reply(
@@ -795,10 +822,9 @@ async function sendCurrentProgram(ctx: any, targetId?: number) {
 
 async function startQuiz(ctx: any) {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.reply('Доступ закрыт.');
-  const targetId = selectedClient.get(ctx.from.id) ?? ctx.from.id;
+  const targetId = selectedClient.get(ctx.from.id);
+  if (!targetId) return ctx.reply('Сначала выбери клиента в разделе «Клиенты» или добавь нового клиента.');
   quizTargets.set(ctx.from.id, targetId);
-  if (!(await isAdmin(ctx))) return ctx.reply('Доступ закрыт.');
-  if (!ctx.from) return ctx.reply('Доступ закрыт.');
   sessions.set(ctx.from.id, { step: 'goal' });
   await ctx.reply('Шаг 1/6. Какая главная цель?', {
     reply_markup: new InlineKeyboard()
@@ -810,13 +836,8 @@ async function startQuiz(ctx: any) {
 }
 
 async function startKeyboard() {
-  const keyboard = new InlineKeyboard()
-    .text('📝 Заполнить анкету', 'quiz:start')
-    .row()
-    .text('👤 Мой профиль', 'profile')
-    .row()
-    .text('🏋️ Моя программа', 'program:current');
-  if (adminId !== null) keyboard.row().text('🛠 Админ-панель', 'admin:open');
+  const keyboard = new InlineKeyboard();
+  if (adminId !== null) keyboard.text('🛠 Админ-панель', 'admin:open');
   return keyboard;
 }
 
@@ -832,12 +853,8 @@ async function sendAdminPanel(ctx: any) {
       .row()
       .text('➕ Добавить клиента', 'admin:client:add')
       .row()
-      .text('🏋️ Текущая программа', 'program:current')
-      .row()
-      .text('📚 История программ', 'program:history')
-      .row()
-      .text('📝 Заполнить анкету', 'quiz:start')
-      .text('👤 Мой профиль', 'profile')
+      .text('👥 Клиенты', 'admin:profiles')
+      .text('📊 Статистика', 'admin:stats')
   });
 }
 
@@ -899,7 +916,7 @@ async function getProgramHistory(userId: number) {
 
 bot.command('start', async (ctx) => {
   if (!(await claimAdmin(ctx))) return ctx.reply('Доступ закрыт.');
-  await ctx.reply('Pavel Fitness Support Bot\n\nВнутренний инструмент тренера. Профиль → программа → коррекция → история версий.', {
+  await ctx.reply('Pavel Fitness Support Bot\n\nЛичный блокнот тренера. Клиенты → анкета → замеры → программа → оплата → история.', {
     reply_markup: await startKeyboard()
   });
 });
@@ -913,9 +930,11 @@ bot.command('help', async (ctx) => {
 
 bot.command('profile', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.reply('Доступ закрыт.');
-  const profile = await getProfile(ctx.from.id);
-  if (!profile) return ctx.reply('Профиль пока не заполнен. Нажми /start.');
-  const payment = await getPaymentInfo(selectedClient.get(ctx.from.id) ?? ctx.from.id);
+  const targetId = selectedClient.get(ctx.from.id);
+  if (!targetId) return ctx.reply('Сначала выбери клиента в разделе «Клиенты».');
+  const profile = await getProfile(targetId);
+  if (!profile) return ctx.reply('У выбранного клиента пока нет анкеты.');
+  const payment = await getPaymentInfo(targetId);
   await ctx.reply(
     `${identityBlock(profile)}
 
@@ -944,9 +963,11 @@ bot.command('reset', startQuiz);
 bot.callbackQuery('profile', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   await ctx.answerCallbackQuery();
-  const profile = await getProfile(ctx.from.id);
-  if (!profile) return ctx.reply('Профиль пока не заполнен. Нажми «Заполнить анкету».');
-  const payment = await getPaymentInfo(ctx.from.id);
+  const targetId = selectedClient.get(ctx.from.id);
+  if (!targetId) return ctx.reply('Сначала выбери клиента в разделе «Клиенты».');
+  const profile = await getProfile(targetId);
+  if (!profile) return ctx.reply('У выбранного клиента пока нет анкеты.');
+  const payment = await getPaymentInfo(targetId);
   await ctx.reply(
     `👤 <b>Мой профиль</b>
 
@@ -1049,15 +1070,17 @@ ${current ? '🏋️ Программа: <b>есть</b>' : '🏋️ Прогр�
       .row()
       .text('📝 Анкета', 'client:quiz')
       .row()
+      .text('📐 Замеры', 'client:measurements')
+      .row()
       .text('⬅️ Клиенты', 'admin:profiles')
   });
 });
 
 bot.callbackQuery('admin:client:add', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  clientAddSessions.set(ctx.from.id, { step: 'id' });
+  clientAddSessions.set(ctx.from.id, { step: 'username' });
   await ctx.answerCallbackQuery();
-  await ctx.reply('➕ <b>Добавление клиента</b>\n\nВведи Telegram ID клиента. Его можно получить из Telegram-профиля/бота клиента.', { parse_mode: 'HTML' });
+  await ctx.reply('➕ <b>Добавление клиента</b>\n\nВведи username клиента, например <code>@ivan_fit</code>.\n\nПосле добавления анкета заполняется отдельно для этого клиента.', { parse_mode: 'HTML' });
 });
 
 bot.callbackQuery('client:program', async (ctx) => {
@@ -1093,6 +1116,62 @@ bot.callbackQuery('client:quiz', async (ctx) => {
   await startQuiz(ctx);
 });
 
+bot.callbackQuery('client:measurements', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  await ctx.answerCallbackQuery();
+  const profile = await getProfile(id);
+  const { rows } = await pool.query(
+    'SELECT weight_kg, chest_cm, waist_cm, hips_cm, arm_cm, thigh_cm, body_fat_pct, note, measured_at FROM measurements WHERE telegram_user_id=$1 ORDER BY measured_at DESC LIMIT 1',
+    [id]
+  );
+  const m = rows[0];
+  const text = m
+    ? `${identityBlock(profile)}\n\n📐 <b>Последние замеры</b>\n\n⚖️ Вес: ${m.weight_kg ?? '—'} кг\n📏 Грудь: ${m.chest_cm ?? '—'} см\n📏 Талия: ${m.waist_cm ?? '—'} см\n📏 Бёдра: ${m.hips_cm ?? '—'} см\n💪 Рука: ${m.arm_cm ?? '—'} см\n🦵 Бедро: ${m.thigh_cm ?? '—'} см\n📊 % жира: ${m.body_fat_pct ?? '—'}\n📝 ${m.note || 'Без заметки'}\n\nДата: ${new Date(m.measured_at).toLocaleString('ru-RU')}`
+    : `${identityBlock(profile)}\n\n📐 <b>Замеры</b>\n\nДля клиента пока нет сохранённых замеров.`;
+  await ctx.reply(text, {
+    parse_mode: 'HTML',
+    reply_markup: new InlineKeyboard()
+      .text('➕ Добавить замеры', 'measurements:add')
+      .row()
+      .text('📜 История замеров', 'measurements:history')
+      .row()
+      .text('⬅️ Карточка клиента', 'admin:profiles')
+  });
+});
+
+bot.callbackQuery('measurements:add', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  measurementSessions.set(ctx.from.id, { step: 'data', targetId: id });
+  await ctx.answerCallbackQuery();
+  await ctx.reply(`📐 <b>Новые замеры</b>
+
+Введи одной строкой через запятую:
+<b>вес, грудь, талия, бёдра, рука, бедро, % жира</b>
+
+Пример: <code>82.5, 104, 86, 100, 38, 58, 18</code>
+
+Если какой-то показатель не измерялся — поставь <code>-</code>.`, { parse_mode: 'HTML' });
+});
+
+bot.callbackQuery('measurements:history', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  await ctx.answerCallbackQuery();
+  const { rows } = await pool.query(
+    'SELECT weight_kg, chest_cm, waist_cm, hips_cm, arm_cm, thigh_cm, body_fat_pct, note, measured_at FROM measurements WHERE telegram_user_id=$1 ORDER BY measured_at DESC LIMIT 12', [id]
+  );
+  if (!rows.length) return ctx.reply('📐 История замеров пока пуста.');
+  const text = rows.map((m:any, i:number) =>
+    `${i + 1}. <b>${new Date(m.measured_at).toLocaleDateString('ru-RU')}</b> — ⚖️ ${m.weight_kg ?? '—'} кг · грудь ${m.chest_cm ?? '—'} · талия ${m.waist_cm ?? '—'} · бёдра ${m.hips_cm ?? '—'} · рука ${m.arm_cm ?? '—'} · бедро ${m.thigh_cm ?? '—'}${m.body_fat_pct != null ? ` · жир ${m.body_fat_pct}%` : ''}`
+  ).join('\n\n');
+  await ctx.reply(`📜 <b>История замеров</b>\n\n${text}`, { parse_mode: 'HTML' });
+});
+
 bot.callbackQuery('client:correct', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const id = selectedClient.get(ctx.from.id);
@@ -1112,7 +1191,9 @@ bot.callbackQuery('payment:open', async (ctx) => {
 
 bot.callbackQuery('payment:edit', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  paymentSessions.set(ctx.from.id, { step: 'amount', targetId: selectedClient.get(ctx.from.id) ?? ctx.from.id });
+  const targetId = selectedClient.get(ctx.from.id);
+  if (!targetId) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  paymentSessions.set(ctx.from.id, { step: 'amount', targetId });
   await ctx.answerCallbackQuery();
   await ctx.reply('💳 Введи сумму оплаты в рублях. Например: 15000');
 });
@@ -1120,7 +1201,8 @@ bot.callbackQuery('payment:edit', async (ctx) => {
 bot.callbackQuery('payment:history', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   await ctx.answerCallbackQuery();
-  const userId = selectedClient.get(ctx.from.id) ?? ctx.from.id;
+  const userId = selectedClient.get(ctx.from.id);
+  if (!userId) return ctx.reply('Сначала выбери клиента.');
   const profile = await getProfile(userId);
   const { rows } = await pool.query(
     'SELECT type, amount, sessions, remaining, note, created_at FROM payment_history WHERE telegram_user_id = $1 ORDER BY created_at DESC LIMIT 20',
@@ -1173,7 +1255,8 @@ async function useTrainingForClient(ctx: any, userId: number) {
 
 bot.callbackQuery('payment:use', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const targetId = selectedClient.get(ctx.from.id) ?? ctx.from.id;
+  const targetId = selectedClient.get(ctx.from.id);
+  if (!targetId) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
   await ctx.answerCallbackQuery();
   await useTrainingForClient(ctx, targetId);
 });
@@ -1245,28 +1328,44 @@ bot.on('message:text', async (ctx) => {
   const addSession = clientAddSessions.get(ctx.from.id);
   if (addSession) {
     const raw = ctx.message.text.trim();
-    if (addSession.step === 'id') {
-      const id = Number(raw);
-      if (!Number.isSafeInteger(id) || id <= 0) return ctx.reply('Введи корректный числовой Telegram ID.');
-      addSession.id = id;
-      addSession.step = 'username';
-      return ctx.reply('👤 Введи username клиента (например @ivan). Если username нет — напиши «нет».');
+    if (addSession.step === 'username') {
+      const username = raw.replace(/^@/, '').trim().toLowerCase();
+      if (!/^[a-z0-9_]{5,32}$/.test(username)) return ctx.reply('Введи корректный Telegram username, например @ivan_fit.');
+      const existing = await pool.query('SELECT id FROM clients WHERE LOWER(telegram_username)=$1', [username]);
+      if (existing.rows[0]) return ctx.reply('Такой клиент уже есть в базе. Открой «Клиенты» и выбери его.');
+      addSession.username = username;
+      addSession.step = 'name';
+      return ctx.reply('👤 Теперь введи имя клиента. Например: Иван');
     }
-    const username = raw.toLowerCase() === 'нет' ? null : raw.replace(/^@/, '').trim();
-    const id = addSession.id!;
+    const name = raw || 'Клиент';
+    const clientRow = await pool.query('INSERT INTO clients (telegram_username, first_name) VALUES ($1,$2) RETURNING id', [addSession.username, name]);
+    const clientId = Number(clientRow.rows[0].id);
+    const internalId = -clientId;
     await pool.query(
-      `INSERT INTO trainer_profiles (telegram_user_id, telegram_username, first_name, goal, experience, location, workouts_per_week, workout_duration, limitations)
-       VALUES ($1,$2,'Клиент','health','beginner','gym',1,60,'')
-       ON CONFLICT (telegram_user_id) DO UPDATE SET telegram_username=COALESCE(EXCLUDED.telegram_username, trainer_profiles.telegram_username), updated_at=NOW()`,
-      [id, username]
+      "INSERT INTO trainer_profiles (telegram_user_id, telegram_username, first_name, goal, experience, location, workouts_per_week, workout_duration, limitations) VALUES ($1,$2,$3,'health','beginner','gym',1,60,'')",
+      [internalId, addSession.username, name]
     );
     clientAddSessions.delete(ctx.from.id);
-    selectedClient.set(ctx.from.id, id);
-    return ctx.reply('✅ Клиент добавлен и выбран. Теперь заполни его анкету.', {
-      reply_markup: new InlineKeyboard().text('📝 Заполнить анкету', 'client:quiz').row().text('👤 Профиль', 'client:program').row().text('⬅️ Клиенты', 'admin:profiles')
+    selectedClient.set(ctx.from.id, internalId);
+    return ctx.reply(`✅ <b>Клиент добавлен</b>
+
+👤 ${name}
+🔗 @${addSession.username}
+
+Теперь клиент выбран. <b>Анкету заполняешь ты</b> — клиенту ничего делать не нужно.`, {
+      parse_mode: 'HTML',
+      reply_markup: new InlineKeyboard()
+        .text('📝 Заполнить анкету', 'client:quiz')
+        .row()
+        .text('📐 Замеры', 'client:measurements')
+        .row()
+        .text('💳 Оплата', 'client:payment')
+        .row()
+        .text('🏋️ Программа', 'client:program')
+        .row()
+        .text('⬅️ Клиенты', 'admin:profiles')
     });
   }
-
   const searchSession = clientSearchSessions.get(ctx.from.id);
   if (searchSession) {
     const query = ctx.message.text.trim();
@@ -1291,6 +1390,24 @@ ${text}
       parse_mode: 'HTML',
       reply_markup: keyboard
     });
+  }
+
+  const measurement = measurementSessions.get(ctx.from.id);
+  if (measurement) {
+    const parts = ctx.message.text.split(',').map((v) => v.trim());
+    if (parts.length < 7) return ctx.reply('Нужно 7 значений через запятую: вес, грудь, талия, бёдра, рука, бедро, % жира.');
+    const nums = parts.slice(0, 7).map((v) => v === '-' || v === '' ? null : Number(v.replace(',', '.')));
+    if (nums.some((v) => v !== null && (!Number.isFinite(v) || v < 0))) return ctx.reply('Проверь значения замеров. Используй числа или «-».');
+    const [weight, chest, waist, hips, arm, thigh, bodyFat] = nums;
+    await pool.query(
+      'INSERT INTO measurements (telegram_user_id, weight_kg, chest_cm, waist_cm, hips_cm, arm_cm, thigh_cm, body_fat_pct) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+      [measurement.targetId, weight, chest, waist, hips, arm, thigh, bodyFat]
+    );
+    measurementSessions.delete(ctx.from.id);
+    await ctx.reply('✅ Замеры сохранены для выбранного клиента.', {
+      reply_markup: new InlineKeyboard().text('📐 Открыть замеры', 'client:measurements').row().text('⬅️ Карточка клиента', 'admin:profiles')
+    });
+    return;
   }
 
   const payment = paymentSessions.get(ctx.from.id);
