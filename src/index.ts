@@ -169,7 +169,7 @@ async function seedExerciseLibrary() {
   const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM exercise_library');
   if (Number(rows[0]?.count ?? 0) > 0) return;
 
-  const sourceUrl = 'https://raw.githubusercontent.com/plataformafitness/exercises-dataset-main/main/data/exercises.json';
+  const sourceUrl = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/data/exercises.json';
   try {
     const response = await fetch(sourceUrl, { signal: AbortSignal.timeout(30000) });
     if (!response.ok) throw new Error(`Exercise dataset HTTP ${response.status}`);
@@ -191,7 +191,7 @@ async function seedExerciseLibrary() {
           String(ex.instructions?.ru ?? ex.instructions?.en ?? ''),
           sourceUrl
         );
-        return `(\\$${base + 1},\\$${base + 2},\\$${base + 3},\\$${base + 4},\\$${base + 5},\\$${base + 6},\\$${base + 7}::jsonb,\\$${base + 8},\\$${base + 9})`;
+        return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7}::jsonb,$${base + 8},$${base + 9})`;
       }).join(',');
       await pool.query(
         `INSERT INTO exercise_library
@@ -222,7 +222,7 @@ async function seedExerciseLibrary() {
       await pool.query(
         `INSERT INTO exercise_library
           (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url)
-         VALUES (\\$1,\\$2,\\$3,\\$4,\\$5,\\$6,\\$7::jsonb,'',\\$8)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,'',$8)
          ON CONFLICT (id) DO NOTHING`,
         [ex[0],ex[1],ex[2],ex[3],ex[4],ex[5],JSON.stringify(ex[6]),'builtin-fallback']
       );
