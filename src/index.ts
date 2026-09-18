@@ -81,10 +81,10 @@ type Program = {
 
 const sessions = new Map<number, QuizState>();
 const correctionSessions = new Map<number, { programId: number }>();
-const paymentSessions = new Map<number, { step: 'amount' | 'total' | 'remaining'; amount?: number; total?: number; targetId?: number }>();
+const paymentSessions = new Map<number, { step: 'telegramId' | 'amount' | 'total' | 'remaining'; amount?: number; total?: number; targetId?: number }>();
 const clientSearchSessions = new Map<number, { query?: string }>();
 const selectedClient = new Map<number, number>();
-const clientAddSessions = new Map<number, { step: 'username' | 'name'; username?: string }>();
+const clientAddSessions = new Map<number, { step: 'username' | 'name' | 'telegramId'; username?: string; firstName?: string }>();
 const measurementSessions = new Map<number, { step: 'data'; targetId: number }>();
 const quizTargets = new Map<number, number>();
 let adminId: number | null = configuredAdminId;
@@ -171,10 +171,13 @@ async function ensureDatabase() {
       id BIGSERIAL PRIMARY KEY,
       telegram_username TEXT NOT NULL,
       first_name TEXT NOT NULL DEFAULT 'Клиент',
+      telegram_id BIGINT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE UNIQUE INDEX IF NOT EXISTS clients_username_unique_idx ON clients (LOWER(telegram_username));
+    ALTER TABLE clients ADD COLUMN IF NOT EXISTS telegram_id BIGINT;
+    CREATE INDEX IF NOT EXISTS clients_telegram_id_idx ON clients (telegram_id);
 
     CREATE TABLE IF NOT EXISTS measurements (
       id BIGSERIAL PRIMARY KEY,
@@ -866,6 +869,7 @@ async function startQuiz(ctx: any) {
   const targetId = selectedClient.get(ctx.from.id);
   if (!targetId) return ctx.reply('Сначала выбери клиента в разделе «Клиенты» или добавь нового клиента.');
   quizTargets.set(ctx.from.id, targetId);
+  clientSearchSessions.delete(ctx.from.id);
   sessions.set(ctx.from.id, { step: 'goal' });
   await ctx.reply('Шаг 1/6. Какая главная цель?', {
     reply_markup: new InlineKeyboard()
@@ -1087,6 +1091,7 @@ bot.callbackQuery(/^client:select:(\d+)$/, async (ctx) => {
   const profile = await getProfile(clientId);
   if (!profile) return ctx.answerCallbackQuery({ text: 'Клиент не найден.' });
   selectedClient.set(ctx.from.id, clientId);
+  clientSearchSessions.delete(ctx.from.id);
   await ctx.answerCallbackQuery({ text: 'Клиент выбран.' });
   const payment = await getPaymentInfo(clientId);
   const current = await getCurrentProgram(clientId);
@@ -1113,6 +1118,8 @@ ${current ? '🏋️ Программа: <b>есть</b>' : '🏋️ Прогр�
       .row()
       .text('📐 Замеры', 'client:measurements')
       .row()
+      .text('🗑 Удалить клиента', 'client:delete:confirm')
+      .row()
       .text('⬅️ Клиенты', 'admin:profiles')
   });
 });
@@ -1134,10 +1141,9 @@ bot.callbackQuery('client:program', async (ctx) => {
 
 bot.callbackQuery('client:payment', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const id = selectedClient.get(ctx.from.id);
-  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  paymentSessions.set(ctx.from.id, { step: 'telegramId' });
   await ctx.answerCallbackQuery();
-  await sendPaymentPanel(ctx, id);
+  await ctx.reply('🆔 <b>Оплата клиента</b>\n\nСначала введи Telegram ID клиента. После этого продолжим заполнение оплаты.', { parse_mode: 'HTML' });
 });
 
 bot.callbackQuery('client:training', async (ctx) => {
@@ -1155,6 +1161,49 @@ bot.callbackQuery('client:quiz', async (ctx) => {
   quizTargets.set(ctx.from.id, id);
   await ctx.answerCallbackQuery();
   await startQuiz(ctx);
+});
+
+bot.callbackQuery('client:delete:confirm', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  const profile = await getProfile(id);
+  if (!profile) return ctx.answerCallbackQuery({ text: 'Клиент не найден.' });
+  await ctx.answerCallbackQuery();
+  await ctx.reply(
+    `⚠️ <b>Удаление клиента</b>\n\n${identityBlock(profile)}\n\nБудут удалены анкета, программа, оплата, история тренировок и замеры.\n\n<b>Действие необратимо.</b>`,
+    { parse_mode: 'HTML', reply_markup: new InlineKeyboard()
+      .text('🗑 Да, удалить', 'client:delete')
+      .text('↩️ Отмена', 'admin:profiles') }
+  );
+});
+
+bot.callbackQuery('client:delete', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  await ctx.answerCallbackQuery({ text: 'Удаление...' });
+  const clientId = id < 0 ? -id : null;
+  await pool.query('BEGIN');
+  try {
+    await pool.query('DELETE FROM trainer_profiles WHERE telegram_user_id = $1', [id]);
+    if (clientId) await pool.query('DELETE FROM clients WHERE id = $1', [clientId]);
+    await pool.query('COMMIT');
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    console.error('client delete error', error);
+    return ctx.reply('Не удалось удалить клиента. Данные не изменены.');
+  }
+  selectedClient.delete(ctx.from.id);
+  clientSearchSessions.delete(ctx.from.id);
+  quizTargets.delete(ctx.from.id);
+  paymentSessions.delete(ctx.from.id);
+  measurementSessions.delete(ctx.from.id);
+  correctionSessions.delete(ctx.from.id);
+  await ctx.reply('🗑 <b>Клиент удалён.</b>', { parse_mode: 'HTML', reply_markup: new InlineKeyboard()
+    .text('👥 Клиенты', 'admin:profiles')
+    .row()
+    .text('🛠 Админ-панель', 'admin:open') });
 });
 
 bot.callbackQuery('client:measurements', async (ctx) => {
@@ -1227,9 +1276,10 @@ bot.callbackQuery('client:correct', async (ctx) => {
 });
 
 bot.callbackQuery('payment:open', async (ctx) => {
-  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  paymentSessions.set(ctx.from.id, { step: 'telegramId' });
   await ctx.answerCallbackQuery();
-  await sendPaymentPanel(ctx);
+  await ctx.reply('🆔 <b>Оплата</b>\n\nСначала введи Telegram ID клиента. После этого бот покажет его оплату и предложит заполнить сумму и количество тренировок.', { parse_mode: 'HTML' });
 });
 
 bot.callbackQuery('payment:edit', async (ctx) => {
@@ -1380,8 +1430,19 @@ bot.on('message:text', async (ctx) => {
       addSession.step = 'name';
       return ctx.reply('👤 Теперь введи имя клиента. Например: Иван');
     }
-    const name = raw || 'Клиент';
-    const clientRow = await pool.query('INSERT INTO clients (telegram_username, first_name) VALUES ($1,$2) RETURNING id', [addSession.username, name]);
+    if (addSession.step === 'name') {
+      addSession.firstName = raw || 'Клиент';
+      addSession.step = 'telegramId';
+      return ctx.reply('🆔 Теперь введи Telegram ID клиента (число). Он нужен для привязки оплаты.');
+    }
+    const telegramId = Number(raw);
+    if (!Number.isInteger(telegramId) || telegramId <= 0) {
+      return ctx.reply('Введи корректный Telegram ID — только целое положительное число.');
+    }
+    const existingTelegram = await pool.query('SELECT id FROM clients WHERE telegram_id = $1', [telegramId]);
+    if (existingTelegram.rows[0]) return ctx.reply('Такой Telegram ID уже привязан к клиенту.');
+    const name = addSession.firstName || 'Клиент';
+    const clientRow = await pool.query('INSERT INTO clients (telegram_username, first_name, telegram_id) VALUES ($1,$2,$3) RETURNING id', [addSession.username, name, telegramId]);
     const clientId = Number(clientRow.rows[0].id);
     const internalId = -clientId;
     await pool.query(
@@ -1389,6 +1450,7 @@ bot.on('message:text', async (ctx) => {
       [internalId, addSession.username, name]
     );
     clientAddSessions.delete(ctx.from.id);
+    clientSearchSessions.delete(ctx.from.id);
     selectedClient.set(ctx.from.id, internalId);
     return ctx.reply(`✅ <b>Клиент добавлен</b>
 
@@ -1455,8 +1517,33 @@ ${text}
 
   const payment = paymentSessions.get(ctx.from.id);
   if (payment) {
-    const raw = ctx.message.text.trim().replace(',', '.');
-    const value = Number(raw);
+    const rawText = ctx.message.text.trim();
+    if (payment.step === 'telegramId') {
+      const telegramId = Number(rawText);
+      if (!Number.isInteger(telegramId) || telegramId <= 0) return ctx.reply('Введи корректный Telegram ID — только целое положительное число.');
+      const client = await pool.query(
+        `SELECT c.id, c.telegram_id, c.telegram_username, c.first_name
+         FROM clients c WHERE c.telegram_id = $1 LIMIT 1`,
+        [telegramId]
+      );
+      let targetId: number | null = null;
+      if (client.rows[0]) targetId = -Number(client.rows[0].id);
+      else {
+        const profile = await getProfile(telegramId);
+        if (profile) targetId = telegramId;
+      }
+      if (!targetId) {
+        paymentSessions.delete(ctx.from.id);
+        return ctx.reply('Клиент с таким Telegram ID не найден. Сначала добавь клиента и укажи его Telegram ID.');
+      }
+      payment.targetId = targetId;
+      payment.step = 'amount';
+      await ctx.reply(`👤 Клиент найден: @${client.rows[0]?.telegram_username ?? '—'}
+
+💰 Введи сумму оплаты в рублях. Например: 15000`);
+      return;
+    }
+    const value = Number(rawText.replace(',', '.'));
     if (!Number.isFinite(value) || value < 0) return ctx.reply('Введи корректное число.');
     if (payment.step === 'amount') {
       payment.amount = value;
@@ -1480,7 +1567,7 @@ ${text}
     );
     paymentSessions.delete(ctx.from.id);
     await ctx.reply('✅ Данные по оплате и тренировкам сохранены.');
-    return sendPaymentPanel(ctx);
+    return sendPaymentPanel(ctx, targetId);
   }
 
   const correction = correctionSessions.get(ctx.from.id);
@@ -1498,6 +1585,7 @@ ${text}
   const limitations = ctx.message.text.trim();
   try {
     const targetId = quizTargets.get(ctx.from.id) ?? ctx.from.id;
+    clientSearchSessions.delete(ctx.from.id);
     const existingTarget = await getProfile(targetId);
     await saveProfile({
       id: targetId,
@@ -1510,7 +1598,7 @@ ${text}
     if (!created) return ctx.reply('Профиль сохранён, но программу создать не удалось.');
     await ctx.reply('Профиль сохранён ✅\n\nПрограмма составлена автоматически. Ниже — первая версия.');
     const targetProfile = await getProfile(targetId);
-    await sendProgramText(ctx, `${identityBlock(targetProfile)}\n\n${programText(created.program)}`, programKeyboard(created.id));
+    await sendProgramMedia(ctx, created.program, programKeyboard(created.id));
   } catch (error) {
     console.error('save profile/program error', error);
     await ctx.reply('Не удалось сохранить профиль или программу. Проверь подключение базы данных.');
