@@ -172,7 +172,7 @@ async function seedExerciseLibrary() {
   const sourceUrl = 'https://raw.githubusercontent.com/plataformafitness/exercises-dataset-main/main/data/exercises.json';
   try {
     const response = await fetch(sourceUrl, { signal: AbortSignal.timeout(30000) });
-    if (!response.ok) throw new Error(\`Exercise dataset HTTP \${response.status}\`);
+    if (!response.ok) throw new Error(`Exercise dataset HTTP ${response.status}`);
     const data = await response.json() as any[];
 
     for (let i = 0; i < data.length; i += 100) {
@@ -191,17 +191,17 @@ async function seedExerciseLibrary() {
           String(ex.instructions?.ru ?? ex.instructions?.en ?? ''),
           sourceUrl
         );
-        return \`(\\$\${base + 1},\\$\${base + 2},\\$\${base + 3},\\$\${base + 4},\\$\${base + 5},\\$\${base + 6},\\$\${base + 7}::jsonb,\\$\${base + 8},\\$\${base + 9})\`;
+        return `(\\$${base + 1},\\$${base + 2},\\$${base + 3},\\$${base + 4},\\$${base + 5},\\$${base + 6},\\$${base + 7}::jsonb,\\$${base + 8},\\$${base + 9})`;
       }).join(',');
       await pool.query(
-        \`INSERT INTO exercise_library
+        `INSERT INTO exercise_library
           (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url)
-         VALUES \${placeholders}
-         ON CONFLICT (id) DO NOTHING\`,
+         VALUES ${placeholders}
+         ON CONFLICT (id) DO NOTHING`,
         values
       );
     }
-    console.log(\`Exercise library seeded: \${data.length} exercises\`);
+    console.log(`Exercise library seeded: ${data.length} exercises`);
   } catch (error) {
     console.error('Exercise library seed failed; using built-in fallback.', error);
     const fallback = [
@@ -220,10 +220,10 @@ async function seedExerciseLibrary() {
     ];
     for (const ex of fallback) {
       await pool.query(
-        \`INSERT INTO exercise_library
+        `INSERT INTO exercise_library
           (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url)
          VALUES (\\$1,\\$2,\\$3,\\$4,\\$5,\\$6,\\$7::jsonb,'',\\$8)
-         ON CONFLICT (id) DO NOTHING\`,
+         ON CONFLICT (id) DO NOTHING`,
         [ex[0],ex[1],ex[2],ex[3],ex[4],ex[5],JSON.stringify(ex[6]),'builtin-fallback']
       );
     }
@@ -262,16 +262,16 @@ function ruExerciseName(name: string) {
 async function getLibraryExercises(location: string, goal: string, version: number): Promise<Exercise[]> {
   const gym = location === 'gym' || (location === 'mixed' && version % 2 === 1);
   const equipmentFilter = gym
-    ? \`equipment NOT IN ('body weight','band','resistance band')\`
-    : \`equipment = 'body weight'\`;
+    ? `equipment NOT IN ('body weight','band','resistance band')`
+    : `equipment = 'body weight'`;
 
   const { rows } = await pool.query(
-    \`SELECT id, name, category, equipment, target, muscle_group, secondary_muscles, instructions_ru
+    `SELECT id, name, category, equipment, target, muscle_group, secondary_muscles, instructions_ru
      FROM exercise_library
-     WHERE \${equipmentFilter}
+     WHERE ${equipmentFilter}
        AND category IN ('upper legs','chest','back','shoulders','waist','lower legs')
      ORDER BY id
-     LIMIT 80\`
+     LIMIT 80`
   );
 
   const selected: any[] = [];
