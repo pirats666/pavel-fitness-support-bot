@@ -30,6 +30,7 @@ type QuizState = {
   location?: string;
   workoutsPerWeek?: number;
   workoutDuration?: number;
+  limitations?: string;
 };
 
 const sessions = new Map<number, QuizState>();
@@ -66,7 +67,7 @@ async function saveProfile(user: {
       state.location,
       state.workoutsPerWeek,
       state.workoutDuration,
-      state['limitations'] ?? ''
+      state.limitations ?? ''
     ]
   );
 }
