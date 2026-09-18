@@ -52,6 +52,8 @@ type LibraryExercise = {
   secondaryMuscles: string[];
   instructionsRu: string;
   sourceUrl: string;
+  gifUrl?: string;
+  imageUrl?: string;
 };
 
 type WorkoutDay = {
@@ -150,6 +152,8 @@ async function ensureDatabase() {
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_total INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_remaining INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS gif_url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS bot_settings (
       key TEXT PRIMARY KEY,
@@ -179,6 +183,8 @@ async function ensureDatabase() {
       secondary_muscles JSONB NOT NULL DEFAULT '[]'::jsonb,
       instructions_ru TEXT NOT NULL DEFAULT '',
       source_url TEXT NOT NULL,
+      gif_url TEXT NOT NULL DEFAULT '',
+      image_url TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS exercise_library_equipment_idx ON exercise_library (equipment);
@@ -201,7 +207,7 @@ async function seedExerciseLibrary() {
       const batch = data.slice(i, i + 100);
       const values: unknown[] = [];
       const placeholders = batch.map((ex, j) => {
-        const base = j * 9;
+        const base = j * 11;
         values.push(
           String(ex.id),
           String(ex.name ?? ''),
@@ -211,13 +217,15 @@ async function seedExerciseLibrary() {
           String(ex.muscle_group ?? ''),
           JSON.stringify(Array.isArray(ex.secondary_muscles) ? ex.secondary_muscles : []),
           String(ex.instructions?.ru ?? ex.instructions?.en ?? ''),
-          sourceUrl
+          sourceUrl,
+          String(ex.gif_url ?? ''),
+          String(ex.image ?? '')
         );
-        return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7}::jsonb,$${base + 8},$${base + 9})`;
+        return `(${base + 1},${base + 2},${base + 3},${base + 4},${base + 5},${base + 6},${base + 7}::jsonb,${base + 8},${base + 9},${base + 10},${base + 11})`;
       }).join(',');
       await pool.query(
         `INSERT INTO exercise_library
-          (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url)
+          (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url,gif_url,image_url)
          VALUES ${placeholders}
          ON CONFLICT (id) DO NOTHING`,
         values
@@ -233,7 +241,6 @@ async function seedExerciseLibrary() {
       ['fallback-lunge','Выпады назад','upper legs','body weight','glutes','glutes',[]],
       ['fallback-good-morning','Good Morning без отягощения','upper legs','body weight','hamstrings','hamstrings',[]],
       ['fallback-dead-bug','Dead Bug','waist','body weight','abs','abs',[]],
-      ['fallback-plank','Боковая планка','waist','body weight','obliques','obliques',[]],
       ['fallback-bench','Жим лёжа','chest','barbell','pectorals','pectorals',[]],
       ['fallback-lat-pulldown','Тяга верхнего блока','back','cable','lats','latissimus dorsi',[]],
       ['fallback-rdl','Румынская тяга','upper legs','barbell','hamstrings','hamstrings',[]],
@@ -303,6 +310,25 @@ function exerciseDifficulty(row: LibraryExercise) {
   return 1;
 }
 
+function limitationExclusions(limitations: string) {
+  const text = normalizeText(limitations);
+  const rules: Array<[string[], RegExp]> = [
+    [['колен', 'knee'], /(squat|lunge|jump|running|step-up|присед|выпад|прыж|бег)/],
+    [['спин', 'поясниц', 'back', 'lower back'], /(deadlift|good morning|row|hinge|тяга|станов|наклон)/],
+    [['плеч', 'shoulder'], /(overhead|shoulder press|lateral raise|dip|жим над головой|жим гантелей|разведен)/],
+    [['локт', 'elbow'], /(curl|extension|dip|push-up|push up|сгибан|разгибан|отжиман)/],
+    [['запяст', 'кист', 'wrist'], /(push-up|push up|plank|barbell|отжиман|планк|штанг)/],
+    [['ше', 'neck'], /(shrug|neck|шраг|шея)/],
+    [['голеностоп', 'лодыж', 'ankle'], /(calf|jump|lunge|выпад|прыж|икр)/]
+  ];
+  return rules.filter(([keywords]) => keywords.some((keyword) => text.includes(keyword))).map(([, pattern]) => pattern);
+}
+
+function isExerciseAllowed(row: LibraryExercise, limitations: string) {
+  const text = normalizeText(`${row.name} ${row.target} ${row.category} ${row.equipment}`);
+  return limitationExclusions(limitations).every((pattern) => !pattern.test(text));
+}
+
 function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desiredCategory: string, usedIds: Set<string>) {
   let score = 0;
   const text = normalizeText(`${row.name} ${row.target} ${row.muscleGroup} ${row.equipment}`);
@@ -353,7 +379,7 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
     : `equipment = 'body weight'`;
 
   const { rows } = await pool.query(
-    `SELECT id, name, category, equipment, target, muscle_group, secondary_muscles, instructions_ru, source_url
+    `SELECT id, name, category, equipment, target, muscle_group, secondary_muscles, instructions_ru, source_url, gif_url, image_url
      FROM exercise_library
      WHERE ${equipmentFilter}
        AND category IN ('upper legs','chest','back','shoulders','waist','lower legs')
@@ -369,10 +395,14 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
     muscleGroup: String(row.muscle_group ?? ''),
     secondaryMuscles: Array.isArray(row.secondary_muscles) ? row.secondary_muscles : [],
     instructionsRu: String(row.instructions_ru ?? ''),
-    sourceUrl: String(row.source_url ?? '')
+    sourceUrl: String(row.source_url ?? ''),
+    gifUrl: String(row.gif_url ?? ''),
+    imageUrl: String(row.image_url ?? '')
   }));
 
-  // A program is built from movement/muscle categories, not from the first six DB rows.
+  const allowedCandidates = candidates.filter((row) => isExerciseAllowed(row, profile.limitations ?? ''));
+
+  // A program is built from movement/muscle categories, not from the first DB rows.
   // Each category is ranked against the questionnaire, then different exercises are rotated by day.
   const categories = ['upper legs', 'chest', 'back', 'shoulders', 'waist'];
   if (profile.goal !== 'mass' && profile.workout_duration >= 45) categories.push('lower legs');
@@ -382,7 +412,7 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
 
   for (let i = 0; i < Math.min(categories.length, 6); i++) {
     const category = categories[(i + (version - 1)) % categories.length];
-    const ranked = candidates
+    const ranked = allowedCandidates
       .filter((row) => row.category === category)
       .map((row) => ({ ...row, score: scoreExercise(row, profile, category, used) }))
       .sort((a, b) => b.score - a.score);
@@ -395,8 +425,8 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
   }
 
   // If the dataset has sparse categories, fill from the highest scoring unused exercises.
-  if (selected.length < 6) {
-    const ranked = candidates
+  if (selected.length < 10) {
+    const ranked = allowedCandidates
       .filter((row) => !used.has(row.id))
       .map((row) => ({
         ...row,
@@ -405,13 +435,13 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
       .sort((a, b) => b.score - a.score);
 
     for (const row of ranked) {
-      if (selected.length >= 6) break;
+      if (selected.length >= 10) break;
       selected.push(row);
       used.add(row.id);
     }
   }
 
-  return selected.slice(0, 6);
+  return selected.slice(0, 10);
 }
 
 function exercisePrescription(row: LibraryExercise, profile: ProfileForProgram, index: number): Exercise {
@@ -465,8 +495,8 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     let dayExercises: Exercise[];
 
     if (baseRows.length) {
-      // Rotate the ranked exercise pool so 3+ weekly sessions are not identical.
-      const rotation = i % baseRows.length;
+      // Rotate the ranked exercise pool with a larger step so weekly sessions are meaningfully different.
+      const rotation = (i * 3) % baseRows.length;
       const rotated = [...baseRows.slice(rotation), ...baseRows.slice(0, rotation)];
       dayExercises = rotated.slice(0, Math.min(6, baseRows.length)).map((e) => ({ ...e }));
     } else {
@@ -480,11 +510,15 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
       }));
     }
 
-    if (version > 1 && i === 0 && correction.toLowerCase().includes('легче')) {
+    if (version > 1 && correction.toLowerCase().includes('легче')) {
       dayExercises.forEach((e) => { e.sets = Math.max(2, e.sets - 1); });
     }
-    if (version > 1 && i === 0 && correction.toLowerCase().includes('интенсивнее')) {
+    if (version > 1 && (correction.toLowerCase().includes('интенсивнее') || correction.toLowerCase().includes('больше'))) {
       dayExercises.forEach((e) => { e.reps = e.reps.replace('10–15', '12–15').replace('8–12', '10–12'); });
+    }
+    if (version > 1 && (correction.toLowerCase().includes('меньше') || correction.toLowerCase().includes('объем'))) {
+      dayExercises = dayExercises.slice(0, Math.max(4, dayExercises.length - 1));
+      dayExercises.forEach((e) => { e.sets = Math.max(2, e.sets - 1); });
     }
 
     return {
@@ -588,7 +622,6 @@ function buildExercises(location: string, goal: string, version: number): Exerci
   const home = [
     { name: 'Приседание с собственным весом', sets: 3, reps: '10–15', rest: '60–90 сек' },
     { name: 'Отжимания', sets: 3, reps: '8–15', rest: '60–90 сек' },
-    { name: 'Ягодичный мост', sets: 3, reps: '12–15', rest: '60 сек' },
     { name: 'Тяга рюкзака в наклоне', sets: 3, reps: '10–15', rest: '60–90 сек' },
     { name: 'Жим рюкзака над головой', sets: 2, reps: '10–12', rest: '60 сек' },
     { name: 'Dead Bug', sets: 2, reps: '8–12/сторона', rest: '45–60 сек' }
@@ -855,8 +888,33 @@ bot.command('reset', startQuiz);
 bot.callbackQuery('profile', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   await ctx.answerCallbackQuery();
-  await ctx.reply('Открываю профиль...');
-  await bot.api.sendMessage(ctx.chat!.id, 'Используйте /profile для полного профиля.');
+  const profile = await getProfile(ctx.from.id);
+  if (!profile) return ctx.reply('Профиль пока не заполнен. Нажми «Заполнить анкету».');
+  const payment = await getPaymentInfo(ctx.from.id);
+  await ctx.reply(
+    `👤 <b>Мой профиль</b>
+
+🎯 Цель: <b>${ruGoal(profile.goal)}</b>
+📚 Опыт: <b>${ruExperience(profile.experience)}</b>
+📍 Место: <b>${ruLocation(profile.location)}</b>
+📅 Тренировок: <b>${profile.workouts_per_week}/нед.</b>
+⏱ Длительность: <b>${profile.workout_duration} мин</b>
+⚠️ Ограничения: <b>${profile.limitations || 'Нет'}</b>
+
+💳 <b>Оплата и тренировки</b>
+Оплачено: <b>${formatMoney(Number(payment.payment_amount))}</b>
+Всего: <b>${Number(payment.training_sessions_total)}</b>
+Осталось: <b>${Number(payment.training_sessions_remaining)}</b>
+Проведено: <b>${Math.max(0, Number(payment.training_sessions_total) - Number(payment.training_sessions_remaining))}</b>`,
+    {
+      parse_mode: 'HTML',
+      reply_markup: new InlineKeyboard()
+        .text('🏋️ Моя программа', 'program:current')
+        .row()
+        .text('💳 Оплата и тренировки', 'payment:open')
+        .text('⬅️ Админ-панель', 'admin:open')
+    }
+  );
 });
 
 bot.callbackQuery('program:current', async (ctx) => {
@@ -923,18 +981,40 @@ bot.callbackQuery('payment:history', async (ctx) => {
 
 bot.callbackQuery('payment:use', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const p = await getPaymentInfo(ctx.from.id);
-  const remaining = Math.max(0, Number(p.training_sessions_remaining) - 1);
-  await pool.query(
-    'UPDATE trainer_profiles SET training_sessions_remaining = $2, updated_at = NOW() WHERE telegram_user_id = $1',
-    [ctx.from.id, remaining]
-  );
-  await pool.query(
-    'INSERT INTO payment_history (telegram_user_id, type, sessions, remaining, note) VALUES ($1,\'training\',1,$2,\'Проведена тренировка\')',
-    [ctx.from.id, remaining]
-  );
-  await ctx.answerCallbackQuery({ text: remaining > 0 ? 'Тренировка списана.' : 'Тренировки закончились.' });
-  await sendPaymentPanel(ctx);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      'SELECT training_sessions_remaining FROM trainer_profiles WHERE telegram_user_id = $1 FOR UPDATE',
+      [ctx.from.id]
+    );
+    const remainingBefore = Number(rows[0]?.training_sessions_remaining ?? 0);
+    if (remainingBefore <= 0) {
+      await client.query('ROLLBACK');
+      return ctx.answerCallbackQuery({ text: 'Нет доступных тренировок.' });
+    }
+
+    const remaining = remainingBefore - 1;
+    await client.query(
+      'UPDATE trainer_profiles SET training_sessions_remaining = $2, updated_at = NOW() WHERE telegram_user_id = $1',
+      [ctx.from.id, remaining]
+    );
+    await client.query(
+      'INSERT INTO payment_history (telegram_user_id, type, sessions, remaining, note) VALUES ($1,\'training\',1,$2,\'Проведена тренировка\')',
+      [ctx.from.id, remaining]
+    );
+    await client.query('COMMIT');
+
+    await ctx.answerCallbackQuery({ text: remaining > 0 ? 'Тренировка списана.' : 'Это была последняя тренировка.' });
+    await sendPaymentPanel(ctx);
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    console.error('training usage error', error);
+    await ctx.answerCallbackQuery({ text: 'Не удалось списать тренировку.' });
+  } finally {
+    client.release();
+  }
 });
 
 bot.callbackQuery('quiz:start', async (ctx) => {
@@ -1067,7 +1147,20 @@ bot.callbackQuery(/^program:correct:(\d+)$/, async (ctx) => {
 bot.callbackQuery(/^program:approve:(\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const id = Number(ctx.match[1]);
-  await pool.query(`UPDATE training_programs SET status='approved' WHERE id=$1 AND status='draft'`, [id]);
+  await pool.query('BEGIN');
+  try {
+    const { rows } = await pool.query('SELECT telegram_user_id FROM training_programs WHERE id=$1', [id]);
+    if (!rows[0]) throw new Error('Program not found');
+    await pool.query(
+      `UPDATE training_programs SET status='archived' WHERE telegram_user_id=$1 AND status='approved' AND id<>$2`,
+      [rows[0].telegram_user_id, id]
+    );
+    await pool.query(`UPDATE training_programs SET status='approved' WHERE id=$1 AND status='draft'`, [id]);
+    await pool.query('COMMIT');
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    throw error;
+  }
   await ctx.answerCallbackQuery({ text: 'Программа подтверждена.' });
   await ctx.reply('✅ Текущая версия программы подтверждена.');
 });
@@ -1098,6 +1191,12 @@ async function main() {
   await pool.query('SELECT 1');
   await ensureDatabase();
   await seedExerciseLibrary();
+  const integrity = await pool.query(`SELECT
+    (SELECT COUNT(*) FROM trainer_profiles) AS profiles,
+    (SELECT COUNT(*) FROM training_programs) AS programs,
+    (SELECT COUNT(*) FROM exercise_library) AS exercises
+  `);
+  console.log('Database integrity:', integrity.rows[0]);
   server.listen(PORT, () => console.log(`Health server listening on :${PORT}`));
   await bot.api.deleteWebhook({ drop_pending_updates: false });
   console.log('Starting Telegram long polling...');
