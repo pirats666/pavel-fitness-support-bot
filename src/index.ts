@@ -1173,41 +1173,8 @@ async function useTrainingForClient(ctx: any, userId: number) {
 bot.callbackQuery('payment:use', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const targetId = selectedClient.get(ctx.from.id) ?? ctx.from.id;
-  return useTrainingForClient(ctx, targetId);
-  /*
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const { rows } = await client.query(
-      'SELECT training_sessions_remaining FROM trainer_profiles WHERE telegram_user_id = $1 FOR UPDATE',
-      [ctx.from.id]
-    );
-    const remainingBefore = Number(rows[0]?.training_sessions_remaining ?? 0);
-    if (remainingBefore <= 0) {
-      await client.query('ROLLBACK');
-      return ctx.answerCallbackQuery({ text: 'Нет доступных тренировок.' });
-    }
-
-    const remaining = remainingBefore - 1;
-    await client.query(
-      'UPDATE trainer_profiles SET training_sessions_remaining = $2, updated_at = NOW() WHERE telegram_user_id = $1',
-      [ctx.from.id, remaining]
-    );
-    await client.query(
-      'INSERT INTO payment_history (telegram_user_id, type, sessions, remaining, note) VALUES ($1,\'training\',1,$2,\'Проведена тренировка\')',
-      [ctx.from.id, remaining]
-    );
-    await client.query('COMMIT');
-
-    await ctx.answerCallbackQuery({ text: remaining > 0 ? 'Тренировка списана.' : 'Это была последняя тренировка.' });
-    await sendPaymentPanel(ctx);
-  } catch (error) {
-    await client.query('ROLLBACK').catch(() => undefined);
-    console.error('training usage error', error);
-    await ctx.answerCallbackQuery({ text: 'Не удалось списать тренировку.' });
-  } finally {
-    client.release();
-  }
+  await ctx.answerCallbackQuery();
+  await useTrainingForClient(ctx, targetId);
 });
 
 bot.callbackQuery('quiz:start', async (ctx) => {
