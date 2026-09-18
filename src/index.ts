@@ -85,7 +85,7 @@ const paymentSessions = new Map<number, { step: 'amount' | 'total' | 'remaining'
 const clientSearchSessions = new Map<number, { query?: string }>();
 const selectedClient = new Map<number, number>();
 const clientAddSessions = new Map<number, { step: 'username' | 'name' | 'telegramId'; username?: string; firstName?: string }>();
-const measurementSessions = new Map<number, { step: 'weight' | 'chest' | 'waist' | 'hips' | 'arm' | 'thigh' | 'bodyFat'; targetId: number; values: { weight?: number | null; chest?: number | null; waist?: number | null; hips?: number | null; arm?: number | null; thigh?: number | null; bodyFat?: number | null } }>();
+const measurementSessions = new Map<number, { step: 'data'; targetId: number }>();
 const quizTargets = new Map<number, number>();
 let adminId: number | null = configuredAdminId;
 
@@ -197,6 +197,9 @@ async function ensureDatabase() {
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_total INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_remaining INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS gif_url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT '';
+
     CREATE TABLE IF NOT EXISTS bot_settings (
       key TEXT PRIMARY KEY,
       admin_telegram_id BIGINT NOT NULL
@@ -232,8 +235,6 @@ async function ensureDatabase() {
     CREATE INDEX IF NOT EXISTS exercise_library_equipment_idx ON exercise_library (equipment);
     CREATE INDEX IF NOT EXISTS exercise_library_category_idx ON exercise_library (category);
     CREATE INDEX IF NOT EXISTS exercise_library_target_idx ON exercise_library (target);
-    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS gif_url TEXT NOT NULL DEFAULT '';
-    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT '';
   `);
 }
 
@@ -396,7 +397,8 @@ function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desired
   if (row.category === desiredCategory) score += 30;
 
   // 2) Goal changes the priority of exercise types and volume later.
-  if (profile.goal === 'mass') {    if (/(chest|pector|back|lat|dorsi|quadr|hamstring|glute|deltoid|shoulder)/.test(text)) score += 8;
+  if (profile.goal === 'mass') {
+    if (/(chest|pector|back|lat|dorsi|quadr|hamstring|glute|deltoid|shoulder)/.test(text)) score += 8;
     if (/(isolation|curl|extension|raise|fly)/.test(text)) score += 2;
   } else if (profile.goal === 'loss') {
     if (/(squat|lunge|row|push|press|pull|deadlift|carry)/.test(text)) score += 6;
@@ -795,7 +797,8 @@ function programText(program: Program) {
     ''
   ];
 
-  for (const day of program.days) {    parts.push(
+  for (const day of program.days) {
+    parts.push(
       '',
       '━━━━━━━━━━━━━━',
       '',
@@ -1065,7 +1068,7 @@ bot.callbackQuery('admin:profiles', async (ctx) => {
     : 'Клиентов пока нет.';
   await ctx.reply(`👥 <b>Клиенты</b>
 
-🔎 Чтобы найти клиента, напиши его <b>username</b>, имя или Telegram ID.
+🔎 Чтобы найти клиента, напиши его <b>username</b>, имя или внутренний ID.
 
 Последние клиенты:
 
@@ -1082,12 +1085,13 @@ bot.callbackQuery('admin:search', async (ctx) => {
   await ctx.reply('🔎 Введи username (например @ivan), имя или внутренний ID клиента.');
 });
 
-bot.callbackQuery(/^client:select:(-?\d+)$/, async (ctx) => {
+bot.callbackQuery(/^client:select:(\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const clientId = Number(ctx.match[1]);
-  const profile = await getProfile(clientId);
+  const profileId = -clientId;
+  const profile = await getProfile(profileId);
   if (!profile) return ctx.answerCallbackQuery({ text: 'Клиент не найден.' });
-  selectedClient.set(ctx.from.id, clientId);
+  selectedClient.set(ctx.from.id, profileId);
   clientSearchSessions.delete(ctx.from.id);
   await ctx.answerCallbackQuery({ text: 'Клиент выбран.' });
   const payment = await getPaymentInfo(clientId);
@@ -1144,11 +1148,146 @@ bot.callbackQuery('client:payment', async (ctx) => {
   return sendPaymentPanel(ctx, targetId);
 });
 
+bot.callbackQuery('client:training', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  await ctx.answerCallbackQuery();
+  await useTrainingForClient(ctx, id);
+});
+
+bot.callbackQuery('client:quiz', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  quizTargets.set(ctx.from.id, id);
+  await ctx.answerCallbackQuery();
+  await startQuiz(ctx);
+});
+
+bot.callbackQuery('client:delete:confirm', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  const profile = await getProfile(id);
+  if (!profile) return ctx.answerCallbackQuery({ text: 'Клиент не найден.' });
+  await ctx.answerCallbackQuery();
+  await ctx.reply(
+    `⚠️ <b>Удаление клиента</b>\n\n${identityBlock(profile)}\n\nБудут удалены анкета, программа, оплата, история тренировок и замеры.\n\n<b>Действие необратимо.</b>`,
+    { parse_mode: 'HTML', reply_markup: new InlineKeyboard()
+      .text('🗑 Да, удалить', 'client:delete')
+      .text('↩️ Отмена', 'admin:profiles') }
+  );
+});
+
+bot.callbackQuery('client:delete', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  await ctx.answerCallbackQuery({ text: 'Удаление...' });
+  const clientId = id < 0 ? -id : null;
+  await pool.query('BEGIN');
+  try {
+    await pool.query('DELETE FROM trainer_profiles WHERE telegram_user_id = $1', [id]);
+    if (clientId) await pool.query('DELETE FROM clients WHERE id = $1', [clientId]);
+    await pool.query('COMMIT');
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    console.error('client delete error', error);
+    return ctx.reply('Не удалось удалить клиента. Данные не изменены.');
+  }
+  selectedClient.delete(ctx.from.id);
+  clientSearchSessions.delete(ctx.from.id);
+  quizTargets.delete(ctx.from.id);
+  paymentSessions.delete(ctx.from.id);
+  measurementSessions.delete(ctx.from.id);
+  correctionSessions.delete(ctx.from.id);
+  await ctx.reply('🗑 <b>Клиент удалён.</b>', { parse_mode: 'HTML', reply_markup: new InlineKeyboard()
+    .text('👥 Клиенты', 'admin:profiles')
+    .row()
+    .text('🛠 Админ-панель', 'admin:open') });
+});
+
+bot.callbackQuery('client:measurements', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  await ctx.answerCallbackQuery();
+  const profile = await getProfile(id);
+  const { rows } = await pool.query(
+    'SELECT weight_kg, chest_cm, waist_cm, hips_cm, arm_cm, thigh_cm, body_fat_pct, note, measured_at FROM measurements WHERE telegram_user_id=$1 ORDER BY measured_at DESC LIMIT 1',
+    [id]
+  );
+  const m = rows[0];
+  const text = m
+    ? `${identityBlock(profile)}\n\n📐 <b>Последние замеры</b>\n\n⚖️ Вес: ${m.weight_kg ?? '—'} кг\n📏 Грудь: ${m.chest_cm ?? '—'} см\n📏 Талия: ${m.waist_cm ?? '—'} см\n📏 Бёдра: ${m.hips_cm ?? '—'} см\n💪 Рука: ${m.arm_cm ?? '—'} см\n🦵 Бедро: ${m.thigh_cm ?? '—'} см\n📊 % жира: ${m.body_fat_pct ?? '—'}\n📝 ${m.note || 'Без заметки'}\n\nДата: ${new Date(m.measured_at).toLocaleString('ru-RU')}`
+    : `${identityBlock(profile)}\n\n📐 <b>Замеры</b>\n\nДля клиента пока нет сохранённых замеров.`;
+  await ctx.reply(text, {
+    parse_mode: 'HTML',
+    reply_markup: new InlineKeyboard()
+      .text('➕ Добавить замеры', 'measurements:add')
+      .row()
+      .text('📜 История замеров', 'measurements:history')
+      .row()
+      .text('⬅️ Карточка клиента', 'admin:profiles')
+  });
+});
+
+bot.callbackQuery('measurements:add', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  measurementSessions.set(ctx.from.id, { step: 'data', targetId: id });
+  await ctx.answerCallbackQuery();
+  await ctx.reply(`📐 <b>Новые замеры</b>
+
+Введи одной строкой через запятую:
+<b>вес, грудь, талия, бёдра, рука, бедро, % жира</b>
+
+Пример: <code>82.5, 104, 86, 100, 38, 58, 18</code>
+
+Если сейчас замеры сделать нельзя — нажми «⏭ Пропустить».\nЕсли какой-то показатель не измерялся — поставь <code>-</code>.`, { parse_mode: 'HTML', reply_markup: new InlineKeyboard().text('⏭ Пропустить', 'measurements:skip') });
+});
+
+bot.callbackQuery('measurements:skip', async (ctx) => { if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' }); measurementSessions.delete(ctx.from.id); await ctx.answerCallbackQuery({ text: 'Замеры пропущены.' }); await ctx.reply('⏭ Замеры пропущены. Их можно добавить позже в карточке клиента.', { reply_markup: new InlineKeyboard().text('📐 Замеры', 'client:measurements').row().text('⬅️ Карточка клиента', 'admin:profiles') }); });
+
+bot.callbackQuery('measurements:history', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  await ctx.answerCallbackQuery();
+  const { rows } = await pool.query(
+    'SELECT weight_kg, chest_cm, waist_cm, hips_cm, arm_cm, thigh_cm, body_fat_pct, note, measured_at FROM measurements WHERE telegram_user_id=$1 ORDER BY measured_at DESC LIMIT 12', [id]
+  );
+  if (!rows.length) return ctx.reply('📐 История замеров пока пуста.');
+  const text = rows.map((m:any, i:number) =>
+    `${i + 1}. <b>${new Date(m.measured_at).toLocaleDateString('ru-RU')}</b> — ⚖️ ${m.weight_kg ?? '—'} кг · грудь ${m.chest_cm ?? '—'} · талия ${m.waist_cm ?? '—'} · бёдра ${m.hips_cm ?? '—'} · рука ${m.arm_cm ?? '—'} · бедро ${m.thigh_cm ?? '—'}${m.body_fat_pct != null ? ` · жир ${m.body_fat_pct}%` : ''}`
+  ).join('\n\n');
+  await ctx.reply(`📜 <b>История замеров</b>\n\n${text}`, { parse_mode: 'HTML' });
+});
+
+bot.callbackQuery('client:correct', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = selectedClient.get(ctx.from.id);
+  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+  const current = await getCurrentProgram(id);
+  if (!current) return ctx.answerCallbackQuery({ text: 'У клиента ещё нет программы.' });
+  correctionSessions.set(ctx.from.id, { programId: Number(current.id) });
+  await ctx.answerCallbackQuery();
+  await ctx.reply('🔄 Что изменить в программе выбранного клиента? Напиши одним сообщением.');
+});
+
 bot.callbackQuery('payment:open', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  paymentSessions.set(ctx.from.id, { step: 'telegramId' });
+  const targetId = selectedClient.get(ctx.from.id);
+  if (!targetId) {
+    await ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
+    return ctx.reply('👥 Сначала выбери клиента в разделе «Клиенты».', {
+      reply_markup: new InlineKeyboard().text('👥 Выбрать клиента', 'admin:profiles')
+    });
+  }
   await ctx.answerCallbackQuery();
-  await ctx.reply('🆔 <b>Оплата</b>\n\nСначала введи Telegram ID клиента. После этого бот покажет его оплату и предложит заполнить сумму и количество тренировок.', { parse_mode: 'HTML' });
+  return sendPaymentPanel(ctx, targetId);
 });
 
 bot.callbackQuery('payment:edit', async (ctx) => {
@@ -1302,19 +1441,12 @@ bot.on('message:text', async (ctx) => {
     if (addSession.step === 'name') {
       addSession.firstName = raw || 'Клиент';
       const name = addSession.firstName;
-      const clientRow = await pool.query('INSERT INTO clients (telegram_username, first_name) VALUES ($1,$2) RETURNING id', [addSession.username, name]);
+      const clientRow = await pool.query(
+        'INSERT INTO clients (telegram_username, first_name) VALUES ($1,$2) RETURNING id',
+        [addSession.username, name]
+      );
       const clientId = Number(clientRow.rows[0].id);
-
-    const telegramId = Number(raw);
-    if (!Number.isInteger(telegramId) || telegramId <= 0) {
-      return ctx.reply('Введи корректный Telegram ID — только целое положительное число.');
-    }
-    const existingTelegram = await pool.query('SELECT id FROM clients WHERE telegram_id = $1', [telegramId]);
-    if (existingTelegram.rows[0]) return ctx.reply('Такой Telegram ID уже привязан к клиенту.');
-    const name = addSession.firstName || 'Клиент';
-    const clientRow = await pool.query('INSERT INTO clients (telegram_username, first_name, telegram_id) VALUES ($1,$2,$3) RETURNING id', [addSession.username, name, telegramId]);
-    const clientId = Number(clientRow.rows[0].id);
-    const internalId = -clientId;
+      const internalId = -clientId;
     await pool.query(
       "INSERT INTO trainer_profiles (telegram_user_id, telegram_username, first_name, goal, experience, location, workouts_per_week, workout_duration, limitations) VALUES ($1,$2,$3,'health','beginner','gym',1,60,'')",
       [internalId, addSession.username, name]
@@ -1369,50 +1501,14 @@ ${text}
 
   const measurement = measurementSessions.get(ctx.from.id);
   if (measurement) {
-    const raw = ctx.message.text.trim();
-    const value = raw === '-' || raw === '' ? null : Number(raw.replace(',', '.'));
-    if (value !== null && (!Number.isFinite(value) || value < 0)) {
-      return ctx.reply('Введи число или «-», если этот показатель не измерялся.');
-    }
-
-    const prompts: Record<typeof measurement.step, string> = {
-      weight: '⚖️ Введи вес клиента в кг. Например: 82.5',
-      chest: '📏 Введи объём груди в см. Например: 104',
-      waist: '📏 Введи объём талии в см. Например: 86',
-      hips: '📏 Введи объём бёдер в см. Например: 100',
-      arm: '💪 Введи объём руки в см. Например: 38',
-      thigh: '🦵 Введи объём бедра в см. Например: 58',
-      bodyFat: '📊 Введи процент жира. Например: 18'
-    };
-
-    const nextStep: Record<typeof measurement.step, typeof measurement.step | null> = {
-      weight: 'chest',
-      chest: 'waist',
-      waist: 'hips',
-      hips: 'arm',
-      arm: 'thigh',
-      thigh: 'bodyFat',
-      bodyFat: null
-    };
-
-    if (measurement.step === 'weight') measurement.values.weight = value;
-    if (measurement.step === 'chest') measurement.values.chest = value;
-    if (measurement.step === 'waist') measurement.values.waist = value;
-    if (measurement.step === 'hips') measurement.values.hips = value;
-    if (measurement.step === 'arm') measurement.values.arm = value;
-    if (measurement.step === 'thigh') measurement.values.thigh = value;
-    if (measurement.step === 'bodyFat') measurement.values.bodyFat = value;
-
-    const next = nextStep[measurement.step];
-    if (next) {
-      measurement.step = next;
-      return ctx.reply(prompts[next] + '\n\nЕсли показатель не измерялся — отправь «-».');
-    }
-
-    const { weight, chest, waist, hips, arm, thigh, bodyFat } = measurement.values;
+    const parts = ctx.message.text.split(',').map((v) => v.trim());
+    if (parts.length < 7) return ctx.reply('Нужно 7 значений через запятую: вес, грудь, талия, бёдра, рука, бедро, % жира.');
+    const nums = parts.slice(0, 7).map((v) => v === '-' || v === '' ? null : Number(v.replace(',', '.')));
+    if (nums.some((v) => v !== null && (!Number.isFinite(v) || v < 0))) return ctx.reply('Проверь значения замеров. Используй числа или «-».');
+    const [weight, chest, waist, hips, arm, thigh, bodyFat] = nums;
     await pool.query(
       'INSERT INTO measurements (telegram_user_id, weight_kg, chest_cm, waist_cm, hips_cm, arm_cm, thigh_cm, body_fat_pct) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
-      [measurement.targetId, weight ?? null, chest ?? null, waist ?? null, hips ?? null, arm ?? null, thigh ?? null, bodyFat ?? null]
+      [measurement.targetId, weight, chest, waist, hips, arm, thigh, bodyFat]
     );
     measurementSessions.delete(ctx.from.id);
     await ctx.reply('✅ Замеры сохранены для выбранного клиента.', {
@@ -1476,6 +1572,7 @@ ${text}
     const created = await createProgram(targetId);
     if (!created) return ctx.reply('Профиль сохранён, но программу создать не удалось.');
     await ctx.reply('Профиль сохранён ✅\n\nПрограмма составлена автоматически. Ниже — первая версия.');
+    const targetProfile = await getProfile(targetId);
     await sendProgramMedia(ctx, created.program, programKeyboard(created.id));
   } catch (error) {
     console.error('save profile/program error', error);
@@ -1524,17 +1621,10 @@ bot.callbackQuery('program:history', async (ctx) => {
 
 bot.catch((error) => console.error('Telegram bot error', error.error));
 
-const server = createServer(async (req, res) => {
+const server = createServer((req, res) => {
   if (req.url === '/health') {
-    try {
-      await pool.query('SELECT 1');
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, service: 'pavel-fitness-support', database: 'ok' }));
-    } catch (error) {
-      console.error('Health database check failed', error);
-      res.writeHead(503, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, service: 'pavel-fitness-support', database: 'error' }));
-    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, service: 'pavel-fitness-support' }));
     return;
   }
   res.writeHead(404);
@@ -1554,21 +1644,7 @@ async function main() {
   server.listen(PORT, () => console.log(`Health server listening on :${PORT}`));
   await bot.api.deleteWebhook({ drop_pending_updates: false });
   console.log('Starting Telegram long polling...');
-
-  while (true) {
-    try {
-      await bot.start({ onStart: (info) => console.log(`Bot @${info.username} started`) });
-      break;
-    } catch (error: any) {
-      const description = String(error?.description ?? error?.message ?? error);
-      if (description.includes('409') || description.includes('getUpdates')) {
-        console.warn('Telegram polling conflict during deploy/restart; retrying in 5 seconds...');
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        continue;
-      }
-      throw error;
-    }
-  }
+  await bot.start({ onStart: (info) => console.log(`Bot @${info.username} started`) });
 }
 
 main().catch((error) => {
