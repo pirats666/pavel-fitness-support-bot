@@ -1144,149 +1144,11 @@ bot.callbackQuery('client:payment', async (ctx) => {
   return sendPaymentPanel(ctx, targetId);
 });
 
-bot.callbackQuery('client:training', async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const id = selectedClient.get(ctx.from.id);
-  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
-  await ctx.answerCallbackQuery();
-  await useTrainingForClient(ctx, id);
-});
-
-bot.callbackQuery('client:quiz', async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const id = selectedClient.get(ctx.from.id);
-  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
-  quizTargets.set(ctx.from.id, id);
-  await ctx.answerCallbackQuery();
-  await startQuiz(ctx);
-});
-
-bot.callbackQuery('client:delete:confirm', async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const id = selectedClient.get(ctx.from.id);
-  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
-  const profile = await getProfile(id);
-  if (!profile) return ctx.answerCallbackQuery({ text: 'Клиент не найден.' });
-  await ctx.answerCallbackQuery();
-  await ctx.reply(
-    `⚠️ <b>Удаление клиента</b>\n\n${identityBlock(profile)}\n\nБудут удалены анкета, программа, оплата, история тренировок и замеры.\n\n<b>Действие необратимо.</b>`,
-    { parse_mode: 'HTML', reply_markup: new InlineKeyboard()
-      .text('🗑 Да, удалить', 'client:delete')
-      .text('↩️ Отмена', 'admin:profiles') }
-  );
-});
-
-bot.callbackQuery('client:delete', async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const id = selectedClient.get(ctx.from.id);
-  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
-  await ctx.answerCallbackQuery({ text: 'Удаление...' });
-  const clientId = id < 0 ? -id : null;
-  await pool.query('BEGIN');
-  try {
-    await pool.query('DELETE FROM trainer_profiles WHERE telegram_user_id = $1', [id]);
-    if (clientId) await pool.query('DELETE FROM clients WHERE id = $1', [clientId]);
-    await pool.query('COMMIT');
-  } catch (error) {
-    await pool.query('ROLLBACK');
-    console.error('client delete error', error);
-    return ctx.reply('Не удалось удалить клиента. Данные не изменены.');
-  }
-  selectedClient.delete(ctx.from.id);
-  clientSearchSessions.delete(ctx.from.id);
-  quizTargets.delete(ctx.from.id);
-  paymentSessions.delete(ctx.from.id);  measurementSessions.delete(ctx.from.id);
-  correctionSessions.delete(ctx.from.id);
-  await ctx.reply('🗑 <b>Клиент удалён.</b>', { parse_mode: 'HTML', reply_markup: new InlineKeyboard()
-    .text('👥 Клиенты', 'admin:profiles')
-    .row()
-    .text('🛠 Админ-панель', 'admin:open') });
-});
-
-bot.callbackQuery('client:measurements', async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const id = selectedClient.get(ctx.from.id);
-  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
-  await ctx.answerCallbackQuery();
-  const profile = await getProfile(id);
-  const { rows } = await pool.query(
-    'SELECT weight_kg, chest_cm, waist_cm, hips_cm, arm_cm, thigh_cm, body_fat_pct, note, measured_at FROM measurements WHERE telegram_user_id=$1 ORDER BY measured_at DESC LIMIT 1',
-    [id]
-  );
-  const m = rows[0];
-  const text = m
-    ? `${identityBlock(profile)}\n\n📐 <b>Последние замеры</b>\n\n⚖️ Вес: ${m.weight_kg ?? '—'} кг\n📏 Грудь: ${m.chest_cm ?? '—'} см\n📏 Талия: ${m.waist_cm ?? '—'} см\n📏 Бёдра: ${m.hips_cm ?? '—'} см\n💪 Рука: ${m.arm_cm ?? '—'} см\n🦵 Бедро: ${m.thigh_cm ?? '—'} см\n📊 % жира: ${m.body_fat_pct ?? '—'}\n📝 ${m.note || 'Без заметки'}\n\nДата: ${new Date(m.measured_at).toLocaleString('ru-RU')}`
-    : `${identityBlock(profile)}\n\n📐 <b>Замеры</b>\n\nДля клиента пока нет сохранённых замеров.`;
-  await ctx.reply(text, {
-    parse_mode: 'HTML',
-    reply_markup: new InlineKeyboard()
-      .text('➕ Добавить замеры', 'measurements:add')
-      .row()
-      .text('📜 История замеров', 'measurements:history')
-      .row()
-      .text('⬅️ Карточка клиента', 'admin:profiles')
-  });
-});
-
-bot.callbackQuery('measurements:add', async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const id = selectedClient.get(ctx.from.id);
-  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
-  measurementSessions.set(ctx.from.id, { step: 'weight', targetId: id, values: {} });
-  await ctx.answerCallbackQuery();
-  await ctx.reply(`📐 <b>Новые замеры</b>
-
-Вводим замеры по одному показателю.
-
-⚖️ Введи вес клиента в кг.
-Например: <code>82.5</code>
-
-Если показатель не измерялся — отправь <code>-</code>.
-Если сейчас замеры сделать нельзя — нажми «⏭ Пропустить».`, {
-    parse_mode: 'HTML',
-    reply_markup: new InlineKeyboard().text('⏭ Пропустить', 'measurements:skip')
-  });
-});
-
-bot.callbackQuery('measurements:skip', async (ctx) => { if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' }); measurementSessions.delete(ctx.from.id); await ctx.answerCallbackQuery({ text: 'Замеры пропущены.' }); await ctx.reply('⏭ Замеры пропущены. Их можно добавить позже в карточке клиента.', { reply_markup: new InlineKeyboard().text('📐 Замеры', 'client:measurements').row().text('⬅️ Карточка клиента', 'admin:profiles') }); });
-
-bot.callbackQuery('measurements:history', async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const id = selectedClient.get(ctx.from.id);
-  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
-  await ctx.answerCallbackQuery();
-  const { rows } = await pool.query(
-    'SELECT weight_kg, chest_cm, waist_cm, hips_cm, arm_cm, thigh_cm, body_fat_pct, note, measured_at FROM measurements WHERE telegram_user_id=$1 ORDER BY measured_at DESC LIMIT 12', [id]
-  );
-  if (!rows.length) return ctx.reply('📐 История замеров пока пуста.');
-  const text = rows.map((m:any, i:number) =>
-    `${i + 1}. <b>${new Date(m.measured_at).toLocaleDateString('ru-RU')}</b> — ⚖️ ${m.weight_kg ?? '—'} кг · грудь ${m.chest_cm ?? '—'} · талия ${m.waist_cm ?? '—'} · бёдра ${m.hips_cm ?? '—'} · рука ${m.arm_cm ?? '—'} · бедро ${m.thigh_cm ?? '—'}${m.body_fat_pct != null ? ` · жир ${m.body_fat_pct}%` : ''}`
-  ).join('\n\n');
-  await ctx.reply(`📜 <b>История замеров</b>\n\n${text}`, { parse_mode: 'HTML' });
-});
-
-bot.callbackQuery('client:correct', async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const id = selectedClient.get(ctx.from.id);
-  if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
-  const current = await getCurrentProgram(id);
-  if (!current) return ctx.answerCallbackQuery({ text: 'У клиента ещё нет программы.' });
-  correctionSessions.set(ctx.from.id, { programId: Number(current.id) });
-  await ctx.answerCallbackQuery();
-  await ctx.reply('🔄 Что изменить в программе выбранного клиента? Напиши одним сообщением.');
-});
-
 bot.callbackQuery('payment:open', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const targetId = selectedClient.get(ctx.from.id);
-  if (!targetId) {
-    await ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
-    return ctx.reply('👥 Сначала выбери клиента в разделе «Клиенты».', {
-      reply_markup: new InlineKeyboard().text('👥 Выбрать клиента', 'admin:profiles')
-    });
-  }
+  paymentSessions.set(ctx.from.id, { step: 'telegramId' });
   await ctx.answerCallbackQuery();
-  return sendPaymentPanel(ctx, targetId);
+  await ctx.reply('🆔 <b>Оплата</b>\n\nСначала введи Telegram ID клиента. После этого бот покажет его оплату и предложит заполнить сумму и количество тренировок.', { parse_mode: 'HTML' });
 });
 
 bot.callbackQuery('payment:edit', async (ctx) => {
@@ -1442,6 +1304,16 @@ bot.on('message:text', async (ctx) => {
       const name = addSession.firstName;
       const clientRow = await pool.query('INSERT INTO clients (telegram_username, first_name) VALUES ($1,$2) RETURNING id', [addSession.username, name]);
       const clientId = Number(clientRow.rows[0].id);
+
+    const telegramId = Number(raw);
+    if (!Number.isInteger(telegramId) || telegramId <= 0) {
+      return ctx.reply('Введи корректный Telegram ID — только целое положительное число.');
+    }
+    const existingTelegram = await pool.query('SELECT id FROM clients WHERE telegram_id = $1', [telegramId]);
+    if (existingTelegram.rows[0]) return ctx.reply('Такой Telegram ID уже привязан к клиенту.');
+    const name = addSession.firstName || 'Клиент';
+    const clientRow = await pool.query('INSERT INTO clients (telegram_username, first_name, telegram_id) VALUES ($1,$2,$3) RETURNING id', [addSession.username, name, telegramId]);
+    const clientId = Number(clientRow.rows[0].id);
     const internalId = -clientId;
     await pool.query(
       "INSERT INTO trainer_profiles (telegram_user_id, telegram_username, first_name, goal, experience, location, workouts_per_week, workout_duration, limitations) VALUES ($1,$2,$3,'health','beginner','gym',1,60,'')",
@@ -1604,7 +1476,7 @@ ${text}
     const created = await createProgram(targetId);
     if (!created) return ctx.reply('Профиль сохранён, но программу создать не удалось.');
     await ctx.reply('Профиль сохранён ✅\n\nПрограмма составлена автоматически. Ниже — первая версия.');
-    const targetProfile = await getProfile(targetId);    await sendProgramMedia(ctx, created.program, programKeyboard(created.id));
+    await sendProgramMedia(ctx, created.program, programKeyboard(created.id));
   } catch (error) {
     console.error('save profile/program error', error);
     await ctx.reply('Не удалось сохранить профиль или программу. Проверь подключение базы данных.');
