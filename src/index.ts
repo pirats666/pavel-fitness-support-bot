@@ -80,7 +80,7 @@ type Program = {
 
 const sessions = new Map<number, QuizState>();
 const correctionSessions = new Map<number, { programId: number }>();
-const paymentSessions = new Map<number, { step: 'amount' | 'total' | 'remaining'; amount?: number; total?: number }>();
+const paymentSessions = new Map<number, { step: 'amount' | 'total' | 'remaining'; amount?: number; total?: number; targetId?: number }>();
 const clientSearchSessions = new Map<number, { query?: string }>();
 const selectedClient = new Map<number, number>();
 const clientAddSessions = new Map<number, { step: 'id' | 'username'; id?: number }>();
@@ -1111,7 +1111,7 @@ bot.callbackQuery('payment:open', async (ctx) => {
 
 bot.callbackQuery('payment:edit', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  paymentSessions.set(ctx.from.id, { step: 'amount' });
+  paymentSessions.set(ctx.from.id, { step: 'amount', targetId: selectedClient.get(ctx.from.id) ?? ctx.from.id });
   await ctx.answerCallbackQuery();
   await ctx.reply('💳 Введи сумму оплаты в рублях. Например: 15000');
 });
@@ -1172,7 +1172,9 @@ async function useTrainingForClient(ctx: any, userId: number) {
 
 bot.callbackQuery('payment:use', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-
+  const targetId = selectedClient.get(ctx.from.id) ?? ctx.from.id;
+  return useTrainingForClient(ctx, targetId);
+  /*
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1342,10 +1344,11 @@ ${text}
     if (!Number.isInteger(value) || value > (payment.total ?? 0)) return ctx.reply('Остаток должен быть целым числом и не больше общего количества тренировок.');
     const amount = payment.amount ?? 0;
     const total = payment.total ?? 0;
-    await updatePaymentInfo(ctx.from.id, amount, total, value);
+    const targetId = payment.targetId ?? selectedClient.get(ctx.from.id) ?? ctx.from.id;
+    await updatePaymentInfo(targetId, amount, total, value);
     await pool.query(
       'INSERT INTO payment_history (telegram_user_id, type, amount, sessions, remaining, note) VALUES ($1,\'payment\',$2,$3,$4,\'Изменение оплаты и пакета тренировок\')',
-      [ctx.from.id, amount, total, value]
+      [targetId, amount, total, value]
     );
     paymentSessions.delete(ctx.from.id);
     await ctx.reply('✅ Данные по оплате и тренировкам сохранены.');
@@ -1417,7 +1420,7 @@ bot.callbackQuery(/^program:approve:(\d+)$/, async (ctx) => {
 bot.callbackQuery('program:history', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   await ctx.answerCallbackQuery();
-  const rows = await getProgramHistory(ctx.from.id);
+  const rows = await getProgramHistory(selectedClient.get(ctx.from.id) ?? ctx.from.id);
   if (!rows.length) return ctx.reply('История программ пока пуста.');
   await ctx.reply('📚 История программ\n\n' + rows.map((r: any) =>
     `Версия ${r.version} — ${r.status === 'approved' ? 'подтверждена' : r.status === 'archived' ? 'архив' : 'черновик'}\nСоздана: ${new Date(r.created_at).toLocaleString('ru-RU')}${r.correction_request ? `\nКоррекция: ${r.correction_request}` : ''}`
