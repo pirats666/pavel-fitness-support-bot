@@ -34,9 +34,25 @@ type QuizState = {
 };
 
 const sessions = new Map<number, QuizState>();
+let adminId: number | null = configuredAdminId;
 
-function isAdmin(ctx: { from?: { id: number } }) {
-  return ctx.from?.id === adminId;
+async function isAdmin(ctx: { from?: { id: number } }) {
+  if (!ctx.from) return false;
+  if (adminId !== null) return ctx.from.id === adminId;
+  const { rows } = await pool.query('SELECT admin_telegram_id FROM bot_settings WHERE key = $1', ['admin_telegram_id']);
+  if (!rows[0]) return false;
+  adminId = Number(rows[0].admin_telegram_id);
+  return ctx.from.id === adminId;
+}
+
+async function claimAdmin(ctx: { from?: { id: number } }) {
+  if (!ctx.from) return false;
+  if (adminId !== null) return ctx.from.id === adminId;
+  await pool.query(`INSERT INTO bot_settings (key, admin_telegram_id) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`, ['admin_telegram_id', ctx.from.id]);
+  const { rows } = await pool.query('SELECT admin_telegram_id FROM bot_settings WHERE key = $1', ['admin_telegram_id']);
+  if (!rows[0]) return false;
+  adminId = Number(rows[0].admin_telegram_id);
+  return ctx.from.id === adminId;
 }
 
 async function saveProfile(user: {
@@ -89,6 +105,11 @@ async function ensureDatabase() {
     );
     CREATE INDEX IF NOT EXISTS trainer_profiles_updated_at_idx
       ON trainer_profiles (updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS bot_settings (
+      key TEXT PRIMARY KEY,
+      admin_telegram_id BIGINT NOT NULL
+    );
   `);
 }
 
@@ -105,7 +126,7 @@ function startKeyboard() {
 }
 
 async function startQuiz(ctx: any) {
-  if (!isAdmin(ctx)) return ctx.reply('Доступ закрыт.');
+  if (!(await isAdmin(ctx))) return ctx.reply('Доступ закрыт.');
   sessions.set(ctx.from.id, { step: 'goal' });
   await ctx.reply('Шаг 1/6. Какая главная цель клиента?', {
     reply_markup: new InlineKeyboard()
@@ -164,7 +185,7 @@ bot.callbackQuery('profile', async (ctx) => {
 });
 
 bot.callbackQuery('quiz:start', async (ctx) => {
-  if (!ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  if (!ctx.from) return;
   await ctx.answerCallbackQuery();
   await startQuiz(ctx);
 });
