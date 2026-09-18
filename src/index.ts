@@ -136,6 +136,17 @@ async function ensureDatabase() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS trainer_profiles_updated_at_idx ON trainer_profiles (updated_at DESC);
+    CREATE TABLE IF NOT EXISTS payment_history (
+      id BIGSERIAL PRIMARY KEY,
+      telegram_user_id BIGINT NOT NULL REFERENCES trainer_profiles(telegram_user_id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK (type IN ('payment','training')),
+      amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      sessions INTEGER NOT NULL DEFAULT 0,
+      remaining INTEGER NOT NULL DEFAULT 0,
+      note TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS payment_history_user_created_idx ON payment_history (telegram_user_id, created_at DESC);
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_total INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_remaining INTEGER NOT NULL DEFAULT 0;
@@ -527,6 +538,47 @@ async function saveProfile(user: { id: number; username?: string; firstName: str
   );
 }
 
+async function getPaymentInfo(userId: number) {
+  const { rows } = await pool.query(
+    'SELECT payment_amount, training_sessions_total, training_sessions_remaining FROM trainer_profiles WHERE telegram_user_id = $1',
+    [userId]
+  );
+  return rows[0] ?? { payment_amount: 0, training_sessions_total: 0, training_sessions_remaining: 0 };
+}
+
+async function updatePaymentInfo(userId: number, amount: number, total: number, remaining: number) {
+  await pool.query(
+    `UPDATE trainer_profiles
+     SET payment_amount = $2, training_sessions_total = $3, training_sessions_remaining = $4, updated_at = NOW()
+     WHERE telegram_user_id = $1`,
+    [userId, amount, total, remaining]
+  );
+}
+
+async function sendPaymentPanel(ctx: any) {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.reply('Доступ закрыт.');
+  const p = await getPaymentInfo(ctx.from.id);
+  await ctx.reply(
+    `💳 <b>Оплата и тренировки</b>
+
+💰 Оплачено: <b>${formatMoney(Number(p.payment_amount))}</b>
+🏋️ Всего тренировок: <b>${Number(p.training_sessions_total)}</b>
+⏳ Осталось тренировок: <b>${Number(p.training_sessions_remaining)}</b>
+✅ Проведено: <b>${Math.max(0, Number(p.training_sessions_total) - Number(p.training_sessions_remaining))}</b>`,
+    {
+      parse_mode: 'HTML',
+      reply_markup: new InlineKeyboard()
+        .text('✏️ Изменить оплату', 'payment:edit')
+        .row()
+        .text('➖ Провести тренировку', 'payment:use')
+        .row()
+        .text('📜 История оплат', 'payment:history')
+        .row()
+        .text('⬅️ Админ-панель', 'admin:open')
+    }
+  );
+}
+
 async function getProfile(id: number) {
   const { rows } = await pool.query('SELECT * FROM trainer_profiles WHERE telegram_user_id = $1', [id]);
   return rows[0] ?? null;
@@ -851,12 +903,34 @@ bot.callbackQuery('payment:edit', async (ctx) => {
   await ctx.reply('💳 Введи сумму оплаты в рублях. Например: 15000');
 });
 
+bot.callbackQuery('payment:history', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  await ctx.answerCallbackQuery();
+  const { rows } = await pool.query(
+    'SELECT type, amount, sessions, remaining, note, created_at FROM payment_history WHERE telegram_user_id = $1 ORDER BY created_at DESC LIMIT 20',
+    [ctx.from.id]
+  );
+  if (!rows.length) return ctx.reply('📜 История оплат пока пуста.');
+  const text = rows.map((r: any, i: number) => {
+    const label = r.type === 'payment' ? '💳 Оплата' : '🏋️ Тренировка';
+    const details = r.type === 'payment'
+      ? `${formatMoney(Number(r.amount))} · пакет ${Number(r.sessions)} трен.`
+      : '1 тренировка';
+    return `${i + 1}. ${label}\n${new Date(r.created_at).toLocaleString('ru-RU')}\n${details}\nОсталось: ${Number(r.remaining)}`;
+  }).join('\n\n');
+  await ctx.reply(`📜 <b>История оплат и тренировок</b>\n\n${text}`, { parse_mode: 'HTML' });
+});
+
 bot.callbackQuery('payment:use', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const p = await getPaymentInfo(ctx.from.id);
   const remaining = Math.max(0, Number(p.training_sessions_remaining) - 1);
   await pool.query(
     'UPDATE trainer_profiles SET training_sessions_remaining = $2, updated_at = NOW() WHERE telegram_user_id = $1',
+    [ctx.from.id, remaining]
+  );
+  await pool.query(
+    'INSERT INTO payment_history (telegram_user_id, type, sessions, remaining, note) VALUES ($1,\'training\',1,$2,\'Проведена тренировка\')',
     [ctx.from.id, remaining]
   );
   await ctx.answerCallbackQuery({ text: remaining > 0 ? 'Тренировка списана.' : 'Тренировки закончились.' });
@@ -947,6 +1021,10 @@ bot.on('message:text', async (ctx) => {
     const amount = payment.amount ?? 0;
     const total = payment.total ?? 0;
     await updatePaymentInfo(ctx.from.id, amount, total, value);
+    await pool.query(
+      'INSERT INTO payment_history (telegram_user_id, type, amount, sessions, remaining, note) VALUES ($1,\'payment\',$2,$3,$4,\'Изменение оплаты и пакета тренировок\')',
+      [ctx.from.id, amount, total, value]
+    );
     paymentSessions.delete(ctx.from.id);
     await ctx.reply('✅ Данные по оплате и тренировкам сохранены.');
     return sendPaymentPanel(ctx);
