@@ -259,47 +259,246 @@ function ruExerciseName(name: string) {
   return hit?.[1] ?? name;
 }
 
-async function getLibraryExercises(location: string, goal: string, version: number): Promise<Exercise[]> {
-  const gym = location === 'gym' || (location === 'mixed' && version % 2 === 1);
+type ProfileForProgram = {
+  goal: string;
+  experience: string;
+  location: string;
+  workouts_per_week: number;
+  workout_duration: number;
+  limitations?: string;
+};
+
+type ScoredLibraryExercise = LibraryExercise & { score: number };
+
+function normalizeText(value: string) {
+  return value.toLowerCase().replace(/ё/g, 'е').trim();
+}
+
+function exerciseDifficulty(row: LibraryExercise) {
+  const text = normalizeText(`${row.name} ${row.target} ${row.category}`);
+  if (/(snatch|clean|jerk|muscle up|handstand|pistol|barbell deadlift|heavy)/.test(text)) return 3;
+  if (/(pull-up|pull up|подтяг|deadlift|станов|barbell squat|приседание со штангой)/.test(text)) return 2;
+  return 1;
+}
+
+function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desiredCategory: string, usedIds: Set<string>) {
+  let score = 0;
+  const text = normalizeText(`${row.name} ${row.target} ${row.muscleGroup} ${row.equipment}`);
+  const difficulty = exerciseDifficulty(row);
+
+  // 1) The exercise must match the requested movement/muscle category.
+  if (row.category === desiredCategory) score += 30;
+
+  // 2) Goal changes the priority of exercise types and volume later.
+  if (profile.goal === 'mass') {
+    if (/(chest|pector|back|lat|dorsi|quadr|hamstring|glute|deltoid|shoulder)/.test(text)) score += 8;
+    if (/(isolation|curl|extension|raise|fly)/.test(text)) score += 2;
+  } else if (profile.goal === 'loss') {
+    if (/(squat|lunge|row|push|press|pull|deadlift|carry)/.test(text)) score += 6;
+    if (/(body weight|bodyweight)/.test(text)) score += 3;
+  } else {
+    if (/(squat|lunge|row|push|press|pull|hinge|deadlift|core|abs)/.test(text)) score += 7;
+  }
+
+  // 3) Experience controls complexity: beginners get simpler patterns first.
+  if (profile.experience === 'beginner' || profile.experience === 'under1') {
+    score += difficulty === 1 ? 8 : difficulty === 2 ? 2 : -10;
+  } else if (profile.experience === '1to3') {
+    score += difficulty <= 2 ? 5 : 1;
+  } else {
+    score += difficulty >= 2 ? 5 : 2;
+  }
+
+  // 4) Match available training environment.
+  const gym = profile.location === 'gym' || (profile.location === 'mixed');
+  if (gym && !/(body weight|bodyweight)/.test(text)) score += 4;
+  if (!gym && /(body weight|bodyweight)/.test(text)) score += 8;
+
+  // 5) Avoid repeating the same exercise across the program where alternatives exist.
+  if (usedIds.has(row.id)) score -= 18;
+
+  // 6) Very short sessions favor simpler choices; longer sessions can tolerate more variety.
+  if (profile.workout_duration <= 45 && difficulty === 3) score -= 5;
+  if (profile.workout_duration >= 75 && difficulty >= 2) score += 2;
+
+  return score;
+}
+
+async function getLibraryExercises(profile: ProfileForProgram, version: number): Promise<LibraryExercise[]> {
+  const gym = profile.location === 'gym' || (profile.location === 'mixed' && version % 2 === 1);
   const equipmentFilter = gym
     ? `equipment NOT IN ('body weight','band','resistance band')`
     : `equipment = 'body weight'`;
 
   const { rows } = await pool.query(
-    `SELECT id, name, category, equipment, target, muscle_group, secondary_muscles, instructions_ru
+    `SELECT id, name, category, equipment, target, muscle_group, secondary_muscles, instructions_ru, source_url
      FROM exercise_library
      WHERE ${equipmentFilter}
        AND category IN ('upper legs','chest','back','shoulders','waist','lower legs')
-     ORDER BY id
-     LIMIT 80`
+     LIMIT 200`
   );
 
-  const selected: any[] = [];
-  const categories = ['upper legs','chest','back','shoulders','waist','lower legs'];
-  for (const category of categories) {
-    const found = rows.find((r: any) =>
-      r.category === category &&
-      !selected.some((x) => x.id === r.id)
-    );
-    if (found) selected.push(found);
-  }
+  const candidates: LibraryExercise[] = rows.map((row: any) => ({
+    id: String(row.id),
+    name: String(row.name ?? ''),
+    category: String(row.category ?? ''),
+    equipment: String(row.equipment ?? ''),
+    target: String(row.target ?? ''),
+    muscleGroup: String(row.muscle_group ?? ''),
+    secondaryMuscles: Array.isArray(row.secondary_muscles) ? row.secondary_muscles : [],
+    instructionsRu: String(row.instructions_ru ?? ''),
+    sourceUrl: String(row.source_url ?? '')
+  }));
 
-  if (selected.length < 6) {
-    for (const row of rows) {
-      if (!selected.some((x) => x.id === row.id)) selected.push(row);
-      if (selected.length >= 6) break;
+  // A program is built from movement/muscle categories, not from the first six DB rows.
+  // Each category is ranked against the questionnaire, then different exercises are rotated by day.
+  const categories = ['upper legs', 'chest', 'back', 'shoulders', 'waist'];
+  if (profile.goal !== 'mass' && profile.workout_duration >= 45) categories.push('lower legs');
+
+  const selected: LibraryExercise[] = [];
+  const used = new Set<string>();
+
+  for (let i = 0; i < Math.min(categories.length, 6); i++) {
+    const category = categories[(i + (version - 1)) % categories.length];
+    const ranked = candidates
+      .filter((row) => row.category === category)
+      .map((row) => ({ ...row, score: scoreExercise(row, profile, category, used) }))
+      .sort((a, b) => b.score - a.score);
+
+    const best = ranked[0];
+    if (best) {
+      selected.push(best);
+      used.add(best.id);
     }
   }
 
-  return selected.slice(0, 6).map((row: any, index: number) => ({
+  // If the dataset has sparse categories, fill from the highest scoring unused exercises.
+  if (selected.length < 6) {
+    const ranked = candidates
+      .filter((row) => !used.has(row.id))
+      .map((row) => ({
+        ...row,
+        score: scoreExercise(row, profile, row.category, used)
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    for (const row of ranked) {
+      if (selected.length >= 6) break;
+      selected.push(row);
+      used.add(row.id);
+    }
+  }
+
+  return selected.slice(0, 6);
+}
+
+function exercisePrescription(row: LibraryExercise, profile: ProfileForProgram, index: number): Exercise {
+  const beginner = profile.experience === 'beginner' || profile.experience === 'under1';
+  const isMass = profile.goal === 'mass';
+  const isHealth = profile.goal === 'health';
+
+  let sets = isMass ? 3 : 2;
+  if (!beginner && index < 4) sets += 1;
+  if (profile.workout_duration <= 45 && index >= 4) sets = 2;
+
+  let reps = isMass ? '8–12' : isHealth ? '10–15' : '10–15';
+  if (beginner) reps = isMass ? '8–12' : '10–15';
+
+  const difficulty = exerciseDifficulty(row);
+  if (beginner && difficulty >= 2 && !isMass) reps = '8–12';
+
+  return {
     name: ruExerciseName(row.name),
-    sets: goal === 'mass' ? (index < 4 ? 3 : 2) : (index < 4 ? 3 : 2),
-    reps: goal === 'mass' ? '8–12' : '10–15',
-    rest: index < 4 ? '60–120 сек' : '45–60 сек',
-    comment: goal === 'mass'
-      ? 'Оставлять 1–3 повторения в запасе; при выполнении верхней границы повторений постепенно повышать нагрузку.'
-      : undefined
-  }));
+    sets,
+    reps,
+    rest: index < 4 ? (isMass ? '90–120 сек' : '60–90 сек') : '45–60 сек',
+    comment: isMass
+      ? 'Контролируемая техника, 1–3 повторения в запасе. При достижении верхней границы повторений постепенно увеличивать нагрузку.'
+      : 'Выбирать вариант упражнения, который можно выполнять с устойчивой техникой без боли.'
+  };
+}
+
+async function buildProgram(profile: any, version: number, correction = ''): Promise<Program> {
+  const normalizedProfile: ProfileForProgram = {
+    goal: String(profile.goal),
+    experience: String(profile.experience),
+    location: String(profile.location),
+    workouts_per_week: Number(profile.workouts_per_week),
+    workout_duration: Number(profile.workout_duration),
+    limitations: String(profile.limitations ?? '')
+  };
+
+  const frequency = Math.min(Math.max(normalizedProfile.workouts_per_week, 1), 5);
+  const duration = normalizedProfile.workout_duration;
+  const daysCount = frequency;
+  const libraryExercises = await getLibraryExercises(normalizedProfile, version);
+  const fallback = buildExercises(normalizedProfile.location, normalizedProfile.goal, version);
+
+  // If the DB does not have enough suitable exercises, use the safe built-in set only for missing slots.
+  const baseRows = libraryExercises.map((row) => exercisePrescription(row, normalizedProfile, libraryExercises.indexOf(row)));
+  const exercises = baseRows.length ? baseRows : fallback;
+
+  const focus = ['Ноги + грудь', 'Спина + задняя цепь', 'Плечи + корпус'];
+  const days: WorkoutDay[] = Array.from({ length: daysCount }, (_, i) => {
+    let dayExercises: Exercise[];
+
+    if (baseRows.length) {
+      // Rotate the ranked exercise pool so 3+ weekly sessions are not identical.
+      const rotation = i % baseRows.length;
+      const rotated = [...baseRows.slice(rotation), ...baseRows.slice(0, rotation)];
+      dayExercises = rotated.slice(0, Math.min(6, baseRows.length)).map((e) => ({ ...e }));
+    } else {
+      dayExercises = exercises.map((e) => ({ ...e }));
+    }
+
+    if (duration <= 45) {
+      dayExercises = dayExercises.slice(0, 5).map((e, idx) => ({
+        ...e,
+        sets: idx >= 3 ? Math.max(2, e.sets - 1) : e.sets
+      }));
+    }
+
+    if (version > 1 && i === 0 && correction.toLowerCase().includes('легче')) {
+      dayExercises.forEach((e) => { e.sets = Math.max(2, e.sets - 1); });
+    }
+    if (version > 1 && i === 0 && correction.toLowerCase().includes('интенсивнее')) {
+      dayExercises.forEach((e) => { e.reps = e.reps.replace('10–15', '12–15').replace('8–12', '10–12'); });
+    }
+
+    return {
+      day: i + 1,
+      title: `Тренировка ${i + 1}`,
+      focus: focus[i % focus.length],
+      warmup: duration <= 45
+        ? '5–7 минут: суставная разминка + лёгкая общая активность.'
+        : '8–10 минут: суставная разминка + лёгкая общая активность.',
+      exercises: dayExercises,
+      cooldown: '3–5 минут спокойного восстановления и лёгкой подвижности.'
+    };
+  });
+
+  return {
+    title: `Программа: ${ruGoal(normalizedProfile.goal)}`,
+    goal: ruGoal(normalizedProfile.goal),
+    frequency,
+    duration,
+    location: ruLocation(normalizedProfile.location),
+    version,
+    weeks: 4,
+    progression: normalizedProfile.goal === 'mass'
+      ? 'При сохранении техники постепенно увеличивать рабочую нагрузку или повторения. Не доводить каждый подход до отказа.'
+      : normalizedProfile.goal === 'loss'
+        ? 'Основная задача — регулярность и постепенное увеличение объёма работы без резкого повышения нагрузки.'
+        : 'Начинать с комфортного объёма и постепенно увеличивать нагрузку по мере адаптации.',
+    days,
+    notes: [
+      'Упражнения подбираются из библиотеки по цели, опыту, месту тренировок, доступному времени и частоте занятий.',
+      normalizedProfile.limitations && normalizeText(normalizedProfile.limitations) !== 'нет'
+        ? `Ограничения из анкеты: ${normalizedProfile.limitations}. При наличии боли или медицинских ограничений требуется индивидуальная оценка специалиста.`
+        : 'Ограничений в анкете не указано.',
+      correction ? `Учтена коррекция: ${correction}` : 'Программа сформирована по исходной анкете.'
+    ]
+  };
 }
 
 async function saveProfile(user: { id: number; username?: string; firstName: string }, state: QuizState) {
