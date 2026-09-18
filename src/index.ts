@@ -1346,7 +1346,7 @@ ${text}
     }, { ...session, limitations });
     sessions.delete(ctx.from.id);
     quizTargets.delete(ctx.from.id);
-    const created = await createProgram(userId);
+    const created = await createProgram(targetId);
     if (!created) return ctx.reply('Профиль сохранён, но программу создать не удалось.');
     await ctx.reply('Профиль сохранён ✅\n\nПрограмма составлена автоматически. Ниже — первая версия.');
     const targetProfile = await getProfile(targetId);
