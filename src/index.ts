@@ -40,6 +40,7 @@ type Exercise = {
   reps: string;
   rest: string;
   comment?: string;
+  gifUrl?: string;
 };
 
 type LibraryExercise = {
@@ -301,32 +302,46 @@ async function seedExerciseLibrary() {
 }
 
 function ruExerciseName(name: string) {
-  const n = name.toLowerCase();
-  const map: Array<[string,string]> = [
-    ['barbell bench press','Жим лёжа со штангой'],
-    ['bench press','Жим лёжа'],
-    ['barbell full squat','Приседание со штангой'],
-    ['barbell squat','Приседание со штангой'],
-    ['goblet squat','Гоблет-присед'],
-    ['pull-up','Подтягивания'],
-    ['pull up','Подтягивания'],
-    ['push-up','Отжимания'],
-    ['push up','Отжимания'],
-    ['dumbbell biceps curl','Сгибание рук с гантелями'],
-    ['dumbbell lateral raise','Разведения гантелей в стороны'],
-    ['dumbbell shoulder press','Жим гантелей сидя'],
-    ['romanian deadlift','Румынская тяга'],
-    ['deadlift','Становая тяга'],
-    ['lat pulldown','Тяга верхнего блока'],
-    ['good morning','Good Morning'],
-    ['reverse lunge','Выпады назад'],
-    ['walking lunge','Выпады'],
-    ['dead bug','Dead Bug'],
-    ['plank','Планка'],
-    ['calf raise','Подъём на носки']
+  const n = normalizeText(name);
+  const map: Array<[RegExp, string]> = [
+    [/barbell.*bench press|bench press|chest press/, 'Жим лёжа'],
+    [/incline.*bench press|incline.*press/, 'Жим лёжа на наклонной скамье'],
+    [/barbell.*squat|full squat/, 'Приседание со штангой'],
+    [/goblet squat/, 'Гоблет-присед'],
+    [/bodyweight squat|air squat/, 'Приседание с собственным весом'],
+    [/split squat/, 'Болгарский сплит-присед'],
+    [/leg press/, 'Жим ногами'],
+    [/leg extension/, 'Разгибание ног в тренажёре'],
+    [/leg curl|inverse leg curl/, 'Сгибание ног в тренажёре'],
+    [/romanian deadlift/, 'Румынская тяга'],
+    [/deadlift/, 'Становая тяга'],
+    [/good morning/, 'Наклон Good Morning'],
+    [/pull-up|pull up|chin-up|chin up/, 'Подтягивания'],
+    [/lat pulldown/, 'Тяга верхнего блока'],
+    [/seated row|cable row|machine row|bent over row|barbell row|dumbbell row/, 'Тяга в наклоне'],
+    [/push-up|push up/, 'Отжимания'],
+    [/dip/, 'Отжимания на брусьях'],
+    [/dumbbell.*shoulder press|shoulder press|overhead press/, 'Жим гантелей над головой'],
+    [/lateral raise/, 'Разведения гантелей в стороны'],
+    [/front raise/, 'Подъём гантелей перед собой'],
+    [/biceps curl|hammer curl/, 'Сгибание рук с гантелями'],
+    [/triceps extension|triceps pushdown/, 'Разгибание рук на трицепс'],
+    [/calf raise/, 'Подъём на носки'],
+    [/reverse lunge/, 'Выпады назад'],
+    [/walking lunge|forward lunge/, 'Выпады вперёд'],
+    [/step-up/, 'Зашагивания на платформу'],
+    [/dead bug/, 'Dead Bug'],
+    [/plank/, 'Планка'],
+    [/crunch|sit-up/, 'Скручивания'],
+    [/leg raise/, 'Подъём ног'],
+    [/back extension/, 'Разгибание спины'],
+    [/hip thrust|glute bridge/, 'Ягодичный мост'],
+    [/fly|chest fly|pec deck/, 'Сведение рук для груди'],
+    [/shrug/, 'Шраги']
   ];
-  const hit = map.find(([key]) => n.includes(key));
-  return hit?.[1] ?? name;
+  const hit = map.find(([pattern]) => pattern.test(n));
+  if (hit) return hit[1];
+  return 'Упражнение на ' + (n.includes('chest') ? 'грудь' : n.includes('back') ? 'спину' : n.includes('shoulder') ? 'плечи' : n.includes('leg') ? 'ноги' : n.includes('abs') || n.includes('waist') ? 'мышцы кора' : 'всё тело');
 }
 
 type ProfileForProgram = {
@@ -502,6 +517,7 @@ function exercisePrescription(row: LibraryExercise, profile: ProfileForProgram, 
 
   return {
     name: ruExerciseName(row.name),
+    gifUrl: row.gifUrl,
     sets,
     reps,
     rest: index < 4 ? (isMass ? '90–120 сек' : '60–90 сек') : '45–60 сек',
@@ -723,33 +739,58 @@ async function getCurrentProgram(userId: number) {
   return rows[0] ?? null;
 }
 
+function escapeHtml(value: unknown) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function resolveGifUrl(gifUrl?: string) {
+  if (!gifUrl) return '';
+  if (/^https?:\/\//i.test(gifUrl)) return gifUrl;
+  return 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/' + gifUrl.replace(/^\/+/, '');
+}
+
 async function sendProgramText(ctx: any, text: string, replyMarkup?: InlineKeyboard) {
   const limit = 3500;
   const chunks: string[] = [];
   for (let i = 0; i < text.length; i += limit) chunks.push(text.slice(i, i + limit));
   for (let i = 0; i < chunks.length; i++) {
-    const options = {
-      parse_mode: 'HTML' as const,
-      ...(i === chunks.length - 1 && replyMarkup ? { reply_markup: replyMarkup } : {})
-    };
+    const options = { parse_mode: 'HTML' as const, ...(i === chunks.length - 1 && replyMarkup ? { reply_markup: replyMarkup } : {}) };
     await ctx.reply(chunks[i], options);
+  }
+}
+
+async function sendProgramMedia(ctx: any, program: Program, replyMarkup?: InlineKeyboard) {
+  await sendProgramText(ctx, programText(program), replyMarkup);
+  const sent = new Set<string>();
+  for (const day of program.days) for (const exercise of day.exercises) {
+    const url = resolveGifUrl(exercise.gifUrl);
+    if (!url || sent.has(url)) continue;
+    sent.add(url);
+    try {
+      await ctx.replyWithAnimation(url, {
+        caption: '💪 <b>' + escapeHtml(exercise.name) + '</b>\nПодходы: <b>' + exercise.sets + '</b> · Повторения: <b>' + escapeHtml(exercise.reps) + '</b> · Отдых: <b>' + escapeHtml(exercise.rest) + '</b>',
+        parse_mode: 'HTML'
+      });
+    } catch (error) {
+      console.error('exercise gif send failed', { name: exercise.name, url, error });
+    }
   }
 }
 
 function programText(program: Program) {
   const parts = [
-    `🏋️ <b>${program.title}</b>`,
+    `🏋️ <b>${escapeHtml(program.title)}</b>`,
     '',
     '📌 <b>Параметры программы</b>',
-    `🎯 Цель: <b>${program.goal}</b>`,
-    `📍 Формат: <b>${program.location}</b>`,
+    `🎯 Цель: <b>${escapeHtml(program.goal)}</b>`,
+    `📍 Формат: <b>${escapeHtml(program.location)}</b>`,
     `📅 График: <b>${program.frequency} тренировки/неделю</b>`,
     `⏱ Длительность: <b>${program.duration} мин</b>`,
     '',
     '━━━━━━━━━━━━━━',
     '',
     '📈 <b>Прогрессия</b>',
-    program.progression,
+    escapeHtml(program.progression),
     ''
   ];
 
@@ -758,11 +799,11 @@ function programText(program: Program) {
       '',
       '━━━━━━━━━━━━━━',
       '',
-      `🏋️ <b>${day.title}</b>`,
-      `🎯 Фокус: <b>${day.focus}</b>`,
+      `🏋️ <b>${escapeHtml(day.title)}</b>`,
+      `🎯 Фокус: <b>${escapeHtml(day.focus)}</b>`,
       '',
       '🔥 <b>Разминка</b>',
-      day.warmup,
+      escapeHtml(day.warmup),
       '',
       '💪 <b>Упражнения</b>',
       ''
@@ -770,17 +811,17 @@ function programText(program: Program) {
 
     day.exercises.forEach((e, i) => {
       parts.push(
-        `<b>${i + 1}. ${e.name}</b>`,
-        `   Подходы: <b>${e.sets}</b>   Повторения: <b>${e.reps}</b>`,
-        `   Отдых: <b>${e.rest}</b>`,
-        e.comment ? `   💡 ${e.comment}` : '',
+        `<b>${i + 1}. ${escapeHtml(e.name)}</b>`,
+        `   Подходы: <b>${e.sets}</b>   Повторения: <b>${escapeHtml(e.reps)}</b>`,
+        `   Отдых: <b>${escapeHtml(e.rest)}</b>`,
+        e.comment ? `   💡 ${escapeHtml(e.comment)}` : '',
         ''
       );
     });
 
     parts.push(
       `🧘 <b>Заминка</b>`,
-      day.cooldown,
+      escapeHtml(day.cooldown),
       ''
     );
   }
@@ -791,7 +832,7 @@ function programText(program: Program) {
     '',
     '📝 <b>Важные примечания</b>',
     '',
-    ...program.notes.map((note) => `• ${note}`)
+    ...program.notes.map((note) => `• ${escapeHtml(note)}`)
   );
 
   return parts.join('\n');
@@ -815,9 +856,9 @@ async function sendCurrentProgram(ctx: any, targetId?: number) {
   if (!current) {
     const created = await createProgram(userId);
     if (!created) return ctx.reply('Сначала заполните профиль.');
-    return sendProgramText(ctx, `${identityBlock(profile)}\n\n${programText(created.program)}`, programKeyboard(created.id));
+    return sendProgramMedia(ctx, created.program, programKeyboard(created.id));
   }
-  await sendProgramText(ctx, `${identityBlock(profile)}\n\n${programText(current.program)}`, programKeyboard(Number(current.id), current.status));
+  await sendProgramMedia(ctx, current.program, programKeyboard(Number(current.id), current.status));
 }
 
 async function startQuiz(ctx: any) {
@@ -1448,8 +1489,8 @@ ${text}
     correctionSessions.delete(ctx.from.id);
     const created = await createProgram(selectedClient.get(ctx.from.id) ?? ctx.from.id, request);
     if (!created) return ctx.reply('Сначала заполните профиль.');
-    await ctx.reply(`Готово. Создана версия ${created.version} с учётом коррекции:\n«${request}»`);
-    return sendProgramText(ctx, programText(created.program), programKeyboard(created.id));
+    await ctx.reply(`Готово. Создана версия ${created.version} с учётом коррекции:\n«${escapeHtml(request)}»`, { parse_mode: 'HTML' });
+    return sendProgramMedia(ctx, created.program, programKeyboard(created.id));
   }
 
   const session = sessions.get(ctx.from.id);
