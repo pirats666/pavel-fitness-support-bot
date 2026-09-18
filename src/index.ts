@@ -1082,7 +1082,7 @@ bot.callbackQuery('admin:search', async (ctx) => {
   await ctx.reply('🔎 Введи username (например @ivan), имя или Telegram ID клиента.');
 });
 
-bot.callbackQuery(/^client:select:(\d+)$/, async (ctx) => {
+bot.callbackQuery(/^client:select:(-?\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const clientId = Number(ctx.match[1]);
   const profile = await getProfile(clientId);
