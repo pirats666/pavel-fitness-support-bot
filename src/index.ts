@@ -438,26 +438,62 @@ async function sendProgramText(ctx: any, text: string, replyMarkup?: InlineKeybo
 
 function programText(program: Program) {
   const parts = [
-    `🏋️ ${program.title}`,
-    `Версия: ${program.version}`,
-    `Цель: ${program.goal}`,
-    `Формат: ${program.location}`,
-    `График: ${program.frequency} тренировки/неделю`,
-    `Длительность: ${program.duration} мин`,
+    `🏋️ <b>${program.title}</b>`,
     '',
-    '📈 Прогрессия:',
+    '📌 <b>Параметры программы</b>',
+    `🎯 Цель: <b>${program.goal}</b>`,
+    `📍 Формат: <b>${program.location}</b>`,
+    `📅 График: <b>${program.frequency} тренировки/неделю</b>`,
+    `⏱ Длительность: <b>${program.duration} мин</b>`,
+    '',
+    '━━━━━━━━━━━━━━',
+    '',
+    '📈 <b>Прогрессия</b>',
     program.progression,
     ''
   ];
+
   for (const day of program.days) {
-    parts.push(`📅 ${day.title} — ${day.focus}`);
-    parts.push(`Разминка: ${day.warmup}`);
+    parts.push(
+      '',
+      '━━━━━━━━━━━━━━',
+      '',
+      `🏋️ <b>${day.title}</b>`,
+      `🎯 Фокус: <b>${day.focus}</b>`,
+      '',
+      '🔥 <b>Разминка</b>',
+      day.warmup,
+      '',
+      '💪 <b>Упражнения</b>',
+      ''
+    );
+
     day.exercises.forEach((e, i) => {
-      parts.push(`${i + 1}. ${e.name} — ${e.sets}×${e.reps}, отдых ${e.rest}${e.comment ? ` — ${e.comment}` : ''}`);
+      parts.push(
+        `<b>${i + 1}. ${e.name}</b>`,
+        `   Подходы: <b>${e.sets}</b>   Повторения: <b>${e.reps}</b>`,
+        `   Отдых: <b>${e.rest}</b>`,
+        e.comment ? `   💡 ${e.comment}` : '',
+        ''
+      );
     });
-    parts.push(`Заминка: ${day.cooldown}`, '');
+
+    parts.push(
+      `🧘 <b>Заминка</b>`,
+      day.cooldown,
+      ''
+    );
   }
-  parts.push('📝 Примечания:', ...program.notes);
+
+  parts.push(
+    '',
+    '━━━━━━━━━━━━━━',
+    '',
+    '📝 <b>Важные примечания</b>',
+    '',
+    ...program.notes.map((note) => `• ${note}`)
+  );
+
   return parts.join('\n');
 }
 
