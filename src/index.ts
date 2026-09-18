@@ -11,11 +11,12 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const PORT = Number(process.env.PORT ?? 10000);
 
 if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
-if (!ADMIN_TELEGRAM_ID) throw new Error('ADMIN_TELEGRAM_ID is required');
 if (!DATABASE_URL) throw new Error('DATABASE_URL is required');
 
-const adminId = Number(ADMIN_TELEGRAM_ID);
-if (!Number.isSafeInteger(adminId)) throw new Error('ADMIN_TELEGRAM_ID must be a Telegram numeric user id');
+const configuredAdminId = ADMIN_TELEGRAM_ID ? Number(ADMIN_TELEGRAM_ID) : null;
+if (configuredAdminId !== null && !Number.isSafeInteger(configuredAdminId)) {
+  throw new Error('ADMIN_TELEGRAM_ID must be a Telegram numeric user id');
+}
 
 const bot = new Bot(BOT_TOKEN);
 const pool = new Pool({
