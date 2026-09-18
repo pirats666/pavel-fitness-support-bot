@@ -78,6 +78,7 @@ type Program = {
 
 const sessions = new Map<number, QuizState>();
 const correctionSessions = new Map<number, { programId: number }>();
+const paymentSessions = new Map<number, { step: 'amount' | 'total' | 'remaining'; amount?: number; total?: number }>();
 let adminId: number | null = configuredAdminId;
 
 async function isAdmin(ctx: { from?: { id: number } }) {
@@ -112,6 +113,10 @@ function ruLocation(value: string) {
   return ({ gym: 'Зал', home: 'Дом', outdoor: 'Улица', mixed: 'Смешанный формат' } as Record<string, string>)[value] ?? value;
 }
 
+function formatMoney(value: number) {
+  return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value) + ' ₽';
+}
+
 async function ensureDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS trainer_profiles (
@@ -124,10 +129,16 @@ async function ensureDatabase() {
       workouts_per_week INTEGER NOT NULL CHECK (workouts_per_week BETWEEN 1 AND 14),
       workout_duration INTEGER NOT NULL CHECK (workout_duration BETWEEN 10 AND 240),
       limitations TEXT NOT NULL DEFAULT '',
+      payment_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      training_sessions_total INTEGER NOT NULL DEFAULT 0 CHECK (training_sessions_total >= 0),
+      training_sessions_remaining INTEGER NOT NULL DEFAULT 0 CHECK (training_sessions_remaining >= 0),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS trainer_profiles_updated_at_idx ON trainer_profiles (updated_at DESC);
+    ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
+    ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_total INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_remaining INTEGER NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS bot_settings (
       key TEXT PRIMARY KEY,
@@ -706,6 +717,8 @@ async function sendAdminPanel(ctx: any) {
     reply_markup: new InlineKeyboard()
       .text('📊 Статистика', 'admin:stats')
       .row()
+      .text('💳 Оплата и тренировки', 'payment:open')
+      .row()
       .text('👥 Последние анкеты', 'admin:profiles')
       .row()
       .text('🏋️ Текущая программа', 'program:current')
@@ -763,6 +776,7 @@ bot.command('profile', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.reply('Доступ закрыт.');
   const profile = await getProfile(ctx.from.id);
   if (!profile) return ctx.reply('Профиль пока не заполнен. Нажми /start.');
+  const payment = await getPaymentInfo(ctx.from.id);
   await ctx.reply(
     `Профиль
 Цель: ${ruGoal(profile.goal)}
@@ -771,6 +785,13 @@ bot.command('profile', async (ctx) => {
 Тренировок в неделю: ${profile.workouts_per_week}
 Длительность: ${profile.workout_duration} мин
 Ограничения: ${profile.limitations || 'Нет'}
+
+💳 Оплата
+Оплачено: ${formatMoney(Number(payment.payment_amount))}
+Всего тренировок: ${Number(payment.training_sessions_total)}
+Осталось: ${Number(payment.training_sessions_remaining)}
+Проведено: ${Math.max(0, Number(payment.training_sessions_total) - Number(payment.training_sessions_remaining))}
+
 Обновлён: ${new Date(profile.updated_at).toLocaleString('ru-RU')}`,
     { reply_markup: new InlineKeyboard().text('🏋️ Составить/открыть программу', 'program:current') }
   );
@@ -815,6 +836,31 @@ bot.callbackQuery('admin:profiles', async (ctx) => {
     return `${i + 1}. ${name}\nЦель: ${ruGoal(p.goal)}\nОпыт: ${ruExperience(p.experience)}\nМесто: ${ruLocation(p.location)}\n${p.workouts_per_week} трен./нед. × ${p.workout_duration} мин.`;
   }).join('\n\n');
   await ctx.reply(`👥 Последние анкеты\n\n${text}`);
+});
+
+bot.callbackQuery('payment:open', async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  await ctx.answerCallbackQuery();
+  await sendPaymentPanel(ctx);
+});
+
+bot.callbackQuery('payment:edit', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  paymentSessions.set(ctx.from.id, { step: 'amount' });
+  await ctx.answerCallbackQuery();
+  await ctx.reply('💳 Введи сумму оплаты в рублях. Например: 15000');
+});
+
+bot.callbackQuery('payment:use', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const p = await getPaymentInfo(ctx.from.id);
+  const remaining = Math.max(0, Number(p.training_sessions_remaining) - 1);
+  await pool.query(
+    'UPDATE trainer_profiles SET training_sessions_remaining = $2, updated_at = NOW() WHERE telegram_user_id = $1',
+    [ctx.from.id, remaining]
+  );
+  await ctx.answerCallbackQuery({ text: remaining > 0 ? 'Тренировка списана.' : 'Тренировки закончились.' });
+  await sendPaymentPanel(ctx);
 });
 
 bot.callbackQuery('quiz:start', async (ctx) => {
@@ -881,6 +927,31 @@ bot.callbackQuery(/^dur:(\d+)$/, async (ctx) => {
 
 bot.on('message:text', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return;
+  const payment = paymentSessions.get(ctx.from.id);
+  if (payment) {
+    const raw = ctx.message.text.trim().replace(',', '.');
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) return ctx.reply('Введи корректное число.');
+    if (payment.step === 'amount') {
+      payment.amount = value;
+      payment.step = 'total';
+      return ctx.reply('🏋️ Сколько тренировок оплачено? Например: 12');
+    }
+    if (payment.step === 'total') {
+      if (!Number.isInteger(value)) return ctx.reply('Количество тренировок должно быть целым числом.');
+      payment.total = value;
+      payment.step = 'remaining';
+      return ctx.reply('⏳ Сколько тренировок осталось? Например: 10');
+    }
+    if (!Number.isInteger(value) || value > (payment.total ?? 0)) return ctx.reply('Остаток должен быть целым числом и не больше общего количества тренировок.');
+    const amount = payment.amount ?? 0;
+    const total = payment.total ?? 0;
+    await updatePaymentInfo(ctx.from.id, amount, total, value);
+    paymentSessions.delete(ctx.from.id);
+    await ctx.reply('✅ Данные по оплате и тренировкам сохранены.');
+    return sendPaymentPanel(ctx);
+  }
+
   const correction = correctionSessions.get(ctx.from.id);
   if (correction) {
     const request = ctx.message.text.trim();
