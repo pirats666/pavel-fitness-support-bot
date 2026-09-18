@@ -604,10 +604,11 @@ async function updatePaymentInfo(userId: number, amount: number, total: number, 
   );
 }
 
-async function sendPaymentPanel(ctx: any) {
+async function sendPaymentPanel(ctx: any, targetId?: number) {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.reply('Доступ закрыт.');
-  const profile = await getProfile(ctx.from.id);
-  const p = await getPaymentInfo(ctx.from.id);
+  const userId = targetId ?? selectedClient.get(ctx.from.id) ?? ctx.from.id;
+  const profile = await getProfile(userId);
+  const p = await getPaymentInfo(userId);
   await ctx.reply(
     `${identityBlock(profile)}
 
@@ -785,7 +786,7 @@ async function sendCurrentProgram(ctx: any, targetId?: number) {
   const profile = await getProfile(userId);
   const current = await getCurrentProgram(userId);
   if (!current) {
-    const created = await createProgram(targetId);
+    const created = await createProgram(userId);
     if (!created) return ctx.reply('Сначала заполните профиль.');
     return sendProgramText(ctx, `${identityBlock(profile)}\n\n${programText(created.program)}`, programKeyboard(created.id));
   }
@@ -1348,7 +1349,8 @@ ${text}
     const created = await createProgram(userId);
     if (!created) return ctx.reply('Профиль сохранён, но программу создать не удалось.');
     await ctx.reply('Профиль сохранён ✅\n\nПрограмма составлена автоматически. Ниже — первая версия.');
-    await sendProgramText(ctx, programText(created.program), programKeyboard(created.id));
+    const targetProfile = await getProfile(targetId);
+    await sendProgramText(ctx, `${identityBlock(targetProfile)}\n\n${programText(created.program)}`, programKeyboard(created.id));
   } catch (error) {
     console.error('save profile/program error', error);
     await ctx.reply('Не удалось сохранить профиль или программу. Проверь подключение базы данных.');
