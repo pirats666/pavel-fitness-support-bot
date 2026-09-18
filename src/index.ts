@@ -1641,10 +1641,17 @@ bot.callbackQuery('program:history', async (ctx) => {
 
 bot.catch((error) => console.error('Telegram bot error', error.error));
 
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
   if (req.url === '/health') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, service: 'pavel-fitness-support' }));
+    try {
+      await pool.query('SELECT 1');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, service: 'pavel-fitness-support', database: 'ok' }));
+    } catch (error) {
+      console.error('Health database check failed', error);
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, service: 'pavel-fitness-support', database: 'error' }));
+    }
     return;
   }
   res.writeHead(404);
