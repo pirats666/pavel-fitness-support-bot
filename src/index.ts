@@ -432,7 +432,11 @@ async function sendProgramText(ctx: any, text: string, replyMarkup?: InlineKeybo
   const chunks: string[] = [];
   for (let i = 0; i < text.length; i += limit) chunks.push(text.slice(i, i + limit));
   for (let i = 0; i < chunks.length; i++) {
-    await ctx.reply(chunks[i], i === chunks.length - 1 && replyMarkup ? { reply_markup: replyMarkup } : undefined);
+    const options = {
+      parse_mode: 'HTML' as const,
+      ...(i === chunks.length - 1 && replyMarkup ? { reply_markup: replyMarkup } : {})
+    };
+    await ctx.reply(chunks[i], options);
   }
 }
 
