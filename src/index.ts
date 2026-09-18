@@ -1472,6 +1472,7 @@ bot.on('message:text', async (ctx) => {
         .row()
         .text('⬅️ Клиенты', 'admin:profiles')
     });
+    }
   }
   const searchSession = clientSearchSessions.get(ctx.from.id);
   if (searchSession) {
@@ -1520,6 +1521,7 @@ ${text}
   const payment = paymentSessions.get(ctx.from.id);
   if (payment) {
     const rawText = ctx.message.text.trim();
+    const value = Number(rawText.replace(',', '.'));
     if (payment.step === 'amount') {
       payment.amount = value;
       payment.step = 'total';
