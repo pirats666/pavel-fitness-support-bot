@@ -42,6 +42,18 @@ type Exercise = {
   comment?: string;
 };
 
+type LibraryExercise = {
+  id: string;
+  name: string;
+  category: string;
+  equipment: string;
+  target: string;
+  muscleGroup: string;
+  secondaryMuscles: string[];
+  instructionsRu: string;
+  sourceUrl: string;
+};
+
 type WorkoutDay = {
   day: number;
   title: string;
@@ -134,7 +146,160 @@ async function ensureDatabase() {
     );
     CREATE INDEX IF NOT EXISTS training_programs_user_created_idx
       ON training_programs (telegram_user_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS exercise_library (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT '',
+      equipment TEXT NOT NULL DEFAULT '',
+      target TEXT NOT NULL DEFAULT '',
+      muscle_group TEXT NOT NULL DEFAULT '',
+      secondary_muscles JSONB NOT NULL DEFAULT '[]'::jsonb,
+      instructions_ru TEXT NOT NULL DEFAULT '',
+      source_url TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS exercise_library_equipment_idx ON exercise_library (equipment);
+    CREATE INDEX IF NOT EXISTS exercise_library_category_idx ON exercise_library (category);
+    CREATE INDEX IF NOT EXISTS exercise_library_target_idx ON exercise_library (target);
   `);
+}
+
+async function seedExerciseLibrary() {
+  const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM exercise_library');
+  if (Number(rows[0]?.count ?? 0) > 0) return;
+
+  const sourceUrl = 'https://raw.githubusercontent.com/plataformafitness/exercises-dataset-main/main/data/exercises.json';
+  try {
+    const response = await fetch(sourceUrl, { signal: AbortSignal.timeout(30000) });
+    if (!response.ok) throw new Error(\`Exercise dataset HTTP \${response.status}\`);
+    const data = await response.json() as any[];
+
+    for (let i = 0; i < data.length; i += 100) {
+      const batch = data.slice(i, i + 100);
+      const values: unknown[] = [];
+      const placeholders = batch.map((ex, j) => {
+        const base = j * 9;
+        values.push(
+          String(ex.id),
+          String(ex.name ?? ''),
+          String(ex.category ?? ''),
+          String(ex.equipment ?? ''),
+          String(ex.target ?? ''),
+          String(ex.muscle_group ?? ''),
+          JSON.stringify(Array.isArray(ex.secondary_muscles) ? ex.secondary_muscles : []),
+          String(ex.instructions?.ru ?? ex.instructions?.en ?? ''),
+          sourceUrl
+        );
+        return \`(\\$\${base + 1},\\$\${base + 2},\\$\${base + 3},\\$\${base + 4},\\$\${base + 5},\\$\${base + 6},\\$\${base + 7}::jsonb,\\$\${base + 8},\\$\${base + 9})\`;
+      }).join(',');
+      await pool.query(
+        \`INSERT INTO exercise_library
+          (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url)
+         VALUES \${placeholders}
+         ON CONFLICT (id) DO NOTHING\`,
+        values
+      );
+    }
+    console.log(\`Exercise library seeded: \${data.length} exercises\`);
+  } catch (error) {
+    console.error('Exercise library seed failed; using built-in fallback.', error);
+    const fallback = [
+      ['fallback-squat','Приседание с собственным весом','upper legs','body weight','quadriceps','quadriceps',[]],
+      ['fallback-pushup','Отжимания','chest','body weight','pectorals','pectorals',[]],
+      ['fallback-row','Тяга рюкзака в наклоне','back','other','latissimus dorsi','latissimus dorsi',[]],
+      ['fallback-lunge','Выпады назад','upper legs','body weight','glutes','glutes',[]],
+      ['fallback-good-morning','Good Morning без отягощения','upper legs','body weight','hamstrings','hamstrings',[]],
+      ['fallback-dead-bug','Dead Bug','waist','body weight','abs','abs',[]],
+      ['fallback-plank','Боковая планка','waist','body weight','obliques','obliques',[]],
+      ['fallback-bench','Жим лёжа','chest','barbell','pectorals','pectorals',[]],
+      ['fallback-lat-pulldown','Тяга верхнего блока','back','cable','lats','latissimus dorsi',[]],
+      ['fallback-rdl','Румынская тяга','upper legs','barbell','hamstrings','hamstrings',[]],
+      ['fallback-shoulder-press','Жим гантелей сидя','shoulders','dumbbell','delts','deltoids',[]],
+      ['fallback-goblet','Гоблет-присед','upper legs','dumbbell','quadriceps','quadriceps',[]]
+    ];
+    for (const ex of fallback) {
+      await pool.query(
+        \`INSERT INTO exercise_library
+          (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url)
+         VALUES (\\$1,\\$2,\\$3,\\$4,\\$5,\\$6,\\$7::jsonb,'',\\$8)
+         ON CONFLICT (id) DO NOTHING\`,
+        [ex[0],ex[1],ex[2],ex[3],ex[4],ex[5],JSON.stringify(ex[6]),'builtin-fallback']
+      );
+    }
+  }
+}
+
+function ruExerciseName(name: string) {
+  const n = name.toLowerCase();
+  const map: Array<[string,string]> = [
+    ['barbell bench press','Жим лёжа со штангой'],
+    ['bench press','Жим лёжа'],
+    ['barbell full squat','Приседание со штангой'],
+    ['barbell squat','Приседание со штангой'],
+    ['goblet squat','Гоблет-присед'],
+    ['pull-up','Подтягивания'],
+    ['pull up','Подтягивания'],
+    ['push-up','Отжимания'],
+    ['push up','Отжимания'],
+    ['dumbbell biceps curl','Сгибание рук с гантелями'],
+    ['dumbbell lateral raise','Разведения гантелей в стороны'],
+    ['dumbbell shoulder press','Жим гантелей сидя'],
+    ['romanian deadlift','Румынская тяга'],
+    ['deadlift','Становая тяга'],
+    ['lat pulldown','Тяга верхнего блока'],
+    ['good morning','Good Morning'],
+    ['reverse lunge','Выпады назад'],
+    ['walking lunge','Выпады'],
+    ['dead bug','Dead Bug'],
+    ['plank','Планка'],
+    ['calf raise','Подъём на носки']
+  ];
+  const hit = map.find(([key]) => n.includes(key));
+  return hit?.[1] ?? name;
+}
+
+async function getLibraryExercises(location: string, goal: string, version: number): Promise<Exercise[]> {
+  const gym = location === 'gym' || (location === 'mixed' && version % 2 === 1);
+  const equipmentFilter = gym
+    ? \`equipment NOT IN ('body weight','band','resistance band')\`
+    : \`equipment = 'body weight'\`;
+
+  const { rows } = await pool.query(
+    \`SELECT id, name, category, equipment, target, muscle_group, secondary_muscles, instructions_ru
+     FROM exercise_library
+     WHERE \${equipmentFilter}
+       AND category IN ('upper legs','chest','back','shoulders','waist','lower legs')
+     ORDER BY id
+     LIMIT 80\`
+  );
+
+  const selected: any[] = [];
+  const categories = ['upper legs','chest','back','shoulders','waist','lower legs'];
+  for (const category of categories) {
+    const found = rows.find((r: any) =>
+      r.category === category &&
+      !selected.some((x) => x.id === r.id)
+    );
+    if (found) selected.push(found);
+  }
+
+  if (selected.length < 6) {
+    for (const row of rows) {
+      if (!selected.some((x) => x.id === row.id)) selected.push(row);
+      if (selected.length >= 6) break;
+    }
+  }
+
+  return selected.slice(0, 6).map((row: any, index: number) => ({
+    name: ruExerciseName(row.name),
+    sets: goal === 'mass' ? (index < 4 ? 3 : 2) : (index < 4 ? 3 : 2),
+    reps: goal === 'mass' ? '8–12' : '10–15',
+    rest: index < 4 ? '60–120 сек' : '45–60 сек',
+    comment: goal === 'mass'
+      ? 'Оставлять 1–3 повторения в запасе; при выполнении верхней границы повторений постепенно повышать нагрузку.'
+      : undefined
+  }));
 }
 
 async function saveProfile(user: { id: number; username?: string; firstName: string }, state: QuizState) {
@@ -189,11 +354,12 @@ function buildExercises(location: string, goal: string, version: number): Exerci
   return base.map((e) => ({ ...e, comment: goal === 'mass' ? 'Оставлять 1–3 повторения в запасе; при выполнении верхней границы повторений постепенно повышать нагрузку.' : undefined }));
 }
 
-function buildProgram(profile: any, version: number, correction = ''): Program {
+async function buildProgram(profile: any, version: number, correction = ''): Promise<Program> {
   const frequency = Math.min(Math.max(Number(profile.workouts_per_week), 1), 5);
   const duration = Number(profile.workout_duration);
   const daysCount = frequency;
-  const exercises = buildExercises(profile.location, profile.goal, version);
+  const libraryExercises = await getLibraryExercises(profile.location, profile.goal, version);
+  const exercises = libraryExercises.length ? libraryExercises : buildExercises(profile.location, profile.goal, version);
   const focus = ['Ноги и жимовые движения', 'Спина и задняя цепь', 'Полное тело'];
   const days: WorkoutDay[] = Array.from({ length: daysCount }, (_, i) => {
     const dayExercises = exercises.map((e, idx) => ({
@@ -242,7 +408,7 @@ async function createProgram(userId: number, correction = '') {
     [userId]
   );
   const version = Number(versionRows[0].next_version);
-  const program = buildProgram(profile, version, correction);
+  const program = await buildProgram(profile, version, correction);
   const { rows } = await pool.query(
     `INSERT INTO training_programs (telegram_user_id, version, status, program, correction_request)
      VALUES ($1,$2,'draft',$3::jsonb,$4) RETURNING id, version`,
@@ -259,6 +425,15 @@ async function getCurrentProgram(userId: number) {
     [userId]
   );
   return rows[0] ?? null;
+}
+
+async function sendProgramText(ctx: any, text: string, replyMarkup?: InlineKeyboard) {
+  const limit = 3500;
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += limit) chunks.push(text.slice(i, i + limit));
+  for (let i = 0; i < chunks.length; i++) {
+    await ctx.reply(chunks[i], i === chunks.length - 1 && replyMarkup ? { reply_markup: replyMarkup } : undefined);
+  }
 }
 
 function programText(program: Program) {
@@ -302,9 +477,9 @@ async function sendCurrentProgram(ctx: any) {
   if (!current) {
     const created = await createProgram(ctx.from.id);
     if (!created) return ctx.reply('Сначала заполните профиль.');
-    return ctx.reply(programText(created.program), { reply_markup: programKeyboard(created.id) });
+    return sendProgramText(ctx, programText(created.program), programKeyboard(created.id));
   }
-  await ctx.reply(programText(current.program), { reply_markup: programKeyboard(Number(current.id), current.status) });
+  await sendProgramText(ctx, programText(current.program), programKeyboard(Number(current.id), current.status));
 }
 
 async function startQuiz(ctx: any) {
@@ -518,9 +693,8 @@ bot.on('message:text', async (ctx) => {
     correctionSessions.delete(ctx.from.id);
     const created = await createProgram(ctx.from.id, request);
     if (!created) return ctx.reply('Сначала заполните профиль.');
-    return ctx.reply(`Готово. Создана версия ${created.version} с учётом коррекции:\n«${request}»\n\n${programText(created.program)}`, {
-      reply_markup: programKeyboard(created.id)
-    });
+    await ctx.reply(`Готово. Создана версия ${created.version} с учётом коррекции:\n«${request}»`);
+    return sendProgramText(ctx, programText(created.program), programKeyboard(created.id));
   }
 
   const session = sessions.get(ctx.from.id);
@@ -532,7 +706,7 @@ bot.on('message:text', async (ctx) => {
     const created = await createProgram(ctx.from.id);
     if (!created) return ctx.reply('Профиль сохранён, но программу создать не удалось.');
     await ctx.reply('Профиль сохранён ✅\n\nПрограмма составлена автоматически. Ниже — первая версия.');
-    await ctx.reply(programText(created.program), { reply_markup: programKeyboard(created.id) });
+    await sendProgramText(ctx, programText(created.program), programKeyboard(created.id));
   } catch (error) {
     console.error('save profile/program error', error);
     await ctx.reply('Не удалось сохранить профиль или программу. Проверь подключение базы данных.');
@@ -580,6 +754,7 @@ const server = createServer((req, res) => {
 async function main() {
   await pool.query('SELECT 1');
   await ensureDatabase();
+  await seedExerciseLibrary();
   server.listen(PORT, () => console.log(`Health server listening on :${PORT}`));
   await bot.api.deleteWebhook({ drop_pending_updates: false });
   console.log('Starting Telegram long polling...');
