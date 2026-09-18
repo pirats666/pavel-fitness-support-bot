@@ -510,7 +510,7 @@ bot.callbackQuery(/^dur:(\d+)$/, async (ctx) => {
   await ctx.editMessageText('Шаг 6/6. Есть ограничения или особенности? Напиши их одним сообщением. Если нет — напиши «нет».');
 });
 
-bot.message('text', async (ctx) => {
+bot.on('message:text', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return;
   const correction = correctionSessions.get(ctx.from.id);
   if (correction) {
