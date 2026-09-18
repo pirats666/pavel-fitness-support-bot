@@ -85,7 +85,7 @@ const paymentSessions = new Map<number, { step: 'telegramId' | 'amount' | 'total
 const clientSearchSessions = new Map<number, { query?: string }>();
 const selectedClient = new Map<number, number>();
 const clientAddSessions = new Map<number, { step: 'username' | 'name' | 'telegramId'; username?: string; firstName?: string }>();
-const measurementSessions = new Map<number, { step: 'data'; targetId: number }>();
+const measurementSessions = new Map<number, { step: 'weight' | 'chest' | 'waist' | 'hips' | 'arm' | 'thigh' | 'bodyFat'; targetId: number; values: { weight?: number | null; chest?: number | null; waist?: number | null; hips?: number | null; arm?: number | null; thigh?: number | null; bodyFat?: number | null } }>();
 const quizTargets = new Map<number, number>();
 let adminId: number | null = configuredAdminId;
 
@@ -1231,16 +1231,20 @@ bot.callbackQuery('measurements:add', async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const id = selectedClient.get(ctx.from.id);
   if (!id) return ctx.answerCallbackQuery({ text: 'Сначала выбери клиента.' });
-  measurementSessions.set(ctx.from.id, { step: 'data', targetId: id });
+  measurementSessions.set(ctx.from.id, { step: 'weight', targetId: id, values: {} });
   await ctx.answerCallbackQuery();
   await ctx.reply(`📐 <b>Новые замеры</b>
 
-Введи одной строкой через запятую:
-<b>вес, грудь, талия, бёдра, рука, бедро, % жира</b>
+Вводим замеры по одному показателю.
 
-Пример: <code>82.5, 104, 86, 100, 38, 58, 18</code>
+⚖️ Введи вес клиента в кг.
+Например: <code>82.5</code>
 
-Если сейчас замеры сделать нельзя — нажми «⏭ Пропустить».\nЕсли какой-то показатель не измерялся — поставь <code>-</code>.`, { parse_mode: 'HTML', reply_markup: new InlineKeyboard().text('⏭ Пропустить', 'measurements:skip') });
+Если показатель не измерялся — отправь <code>-</code>.
+Если сейчас замеры сделать нельзя — нажми «⏭ Пропустить».`, {
+    parse_mode: 'HTML',
+    reply_markup: new InlineKeyboard().text('⏭ Пропустить', 'measurements:skip')
+  });
 });
 
 bot.callbackQuery('measurements:skip', async (ctx) => { if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' }); measurementSessions.delete(ctx.from.id); await ctx.answerCallbackQuery({ text: 'Замеры пропущены.' }); await ctx.reply('⏭ Замеры пропущены. Их можно добавить позже в карточке клиента.', { reply_markup: new InlineKeyboard().text('📐 Замеры', 'client:measurements').row().text('⬅️ Карточка клиента', 'admin:profiles') }); });
@@ -1495,14 +1499,50 @@ ${text}
 
   const measurement = measurementSessions.get(ctx.from.id);
   if (measurement) {
-    const parts = ctx.message.text.split(',').map((v) => v.trim());
-    if (parts.length < 7) return ctx.reply('Нужно 7 значений через запятую: вес, грудь, талия, бёдра, рука, бедро, % жира.');
-    const nums = parts.slice(0, 7).map((v) => v === '-' || v === '' ? null : Number(v.replace(',', '.')));
-    if (nums.some((v) => v !== null && (!Number.isFinite(v) || v < 0))) return ctx.reply('Проверь значения замеров. Используй числа или «-».');
-    const [weight, chest, waist, hips, arm, thigh, bodyFat] = nums;
+    const raw = ctx.message.text.trim();
+    const value = raw === '-' || raw === '' ? null : Number(raw.replace(',', '.'));
+    if (value !== null && (!Number.isFinite(value) || value < 0)) {
+      return ctx.reply('Введи число или «-», если этот показатель не измерялся.');
+    }
+
+    const prompts: Record<typeof measurement.step, string> = {
+      weight: '⚖️ Введи вес клиента в кг. Например: 82.5',
+      chest: '📏 Введи объём груди в см. Например: 104',
+      waist: '📏 Введи объём талии в см. Например: 86',
+      hips: '📏 Введи объём бёдер в см. Например: 100',
+      arm: '💪 Введи объём руки в см. Например: 38',
+      thigh: '🦵 Введи объём бедра в см. Например: 58',
+      bodyFat: '📊 Введи процент жира. Например: 18'
+    };
+
+    const nextStep: Record<typeof measurement.step, typeof measurement.step | null> = {
+      weight: 'chest',
+      chest: 'waist',
+      waist: 'hips',
+      hips: 'arm',
+      arm: 'thigh',
+      thigh: 'bodyFat',
+      bodyFat: null
+    };
+
+    if (measurement.step === 'weight') measurement.values.weight = value;
+    if (measurement.step === 'chest') measurement.values.chest = value;
+    if (measurement.step === 'waist') measurement.values.waist = value;
+    if (measurement.step === 'hips') measurement.values.hips = value;
+    if (measurement.step === 'arm') measurement.values.arm = value;
+    if (measurement.step === 'thigh') measurement.values.thigh = value;
+    if (measurement.step === 'bodyFat') measurement.values.bodyFat = value;
+
+    const next = nextStep[measurement.step];
+    if (next) {
+      measurement.step = next;
+      return ctx.reply(prompts[next] + '\n\nЕсли показатель не измерялся — отправь «-».');
+    }
+
+    const { weight, chest, waist, hips, arm, thigh, bodyFat } = measurement.values;
     await pool.query(
       'INSERT INTO measurements (telegram_user_id, weight_kg, chest_cm, waist_cm, hips_cm, arm_cm, thigh_cm, body_fat_pct) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
-      [measurement.targetId, weight, chest, waist, hips, arm, thigh, bodyFat]
+      [measurement.targetId, weight ?? null, chest ?? null, waist ?? null, hips ?? null, arm ?? null, thigh ?? null, bodyFat ?? null]
     );
     measurementSessions.delete(ctx.from.id);
     await ctx.reply('✅ Замеры сохранены для выбранного клиента.', {
