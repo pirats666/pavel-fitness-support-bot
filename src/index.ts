@@ -1432,18 +1432,9 @@ bot.on('message:text', async (ctx) => {
     }
     if (addSession.step === 'name') {
       addSession.firstName = raw || 'Клиент';
-      addSession.step = 'telegramId';
-      return ctx.reply('🆔 Теперь введи Telegram ID клиента (число). Он нужен для привязки оплаты.');
-    }
-    const telegramId = Number(raw);
-    if (!Number.isInteger(telegramId) || telegramId <= 0) {
-      return ctx.reply('Введи корректный Telegram ID — только целое положительное число.');
-    }
-    const existingTelegram = await pool.query('SELECT id FROM clients WHERE telegram_id = $1', [telegramId]);
-    if (existingTelegram.rows[0]) return ctx.reply('Такой Telegram ID уже привязан к клиенту.');
-    const name = addSession.firstName || 'Клиент';
-    const clientRow = await pool.query('INSERT INTO clients (telegram_username, first_name, telegram_id) VALUES ($1,$2,$3) RETURNING id', [addSession.username, name, telegramId]);
-    const clientId = Number(clientRow.rows[0].id);
+      const name = addSession.firstName;
+      const clientRow = await pool.query('INSERT INTO clients (telegram_username, first_name) VALUES ($1,$2) RETURNING id', [addSession.username, name]);
+      const clientId = Number(clientRow.rows[0].id);
     const internalId = -clientId;
     await pool.query(
       "INSERT INTO trainer_profiles (telegram_user_id, telegram_username, first_name, goal, experience, location, workouts_per_week, workout_duration, limitations) VALUES ($1,$2,$3,'health','beginner','gym',1,60,'')",
