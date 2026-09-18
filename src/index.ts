@@ -72,6 +72,26 @@ async function saveProfile(user: {
   );
 }
 
+async function ensureDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS trainer_profiles (
+      telegram_user_id BIGINT PRIMARY KEY,
+      telegram_username TEXT,
+      first_name TEXT,
+      goal TEXT NOT NULL,
+      experience TEXT NOT NULL,
+      location TEXT NOT NULL,
+      workouts_per_week INTEGER NOT NULL CHECK (workouts_per_week BETWEEN 1 AND 14),
+      workout_duration INTEGER NOT NULL CHECK (workout_duration BETWEEN 10 AND 240),
+      limitations TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS trainer_profiles_updated_at_idx
+      ON trainer_profiles (updated_at DESC);
+  `);
+}
+
 async function getProfile(id: number) {
   const { rows } = await pool.query(
     'SELECT * FROM trainer_profiles WHERE telegram_user_id = $1',
@@ -126,6 +146,22 @@ bot.command('profile', async (ctx) => {
 });
 
 bot.command('reset', startQuiz);
+
+bot.callbackQuery('profile', async (ctx) => {
+  if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  await ctx.answerCallbackQuery();
+  const profile = await getProfile(ctx.from.id);
+  if (!profile) return ctx.reply('Профиль пока не заполнен. Нажми /start.');
+  await ctx.reply(
+    `Профиль
+Цель: ${profile.goal}
+Опыт: ${profile.experience}
+Место: ${profile.location}
+Тренировок в неделю: ${profile.workouts_per_week}
+Длительность: ${profile.workout_duration} мин
+Ограничения: ${profile.limitations || 'нет'}`
+  );
+});
 
 bot.callbackQuery('quiz:start', async (ctx) => {
   await ctx.answerCallbackQuery();
@@ -240,6 +276,7 @@ const server = createServer((req, res) => {
 
 async function main() {
   await pool.query('SELECT 1');
+  await ensureDatabase();
   server.listen(PORT, () => console.log(`Health server listening on :${PORT}`));
   await bot.api.deleteWebhook({ drop_pending_updates: false });
   console.log('Starting Telegram long polling...');
