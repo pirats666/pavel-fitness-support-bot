@@ -944,7 +944,13 @@ async function searchClients(query: string) {
      JOIN trainer_profiles tp ON tp.telegram_user_id = -c.id
      WHERE LOWER(COALESCE(c.telegram_username, '')) LIKE LOWER($1)
         OR LOWER(COALESCE(c.first_name, '')) LIKE LOWER($1)
-        OR (CASE WHEN $2 ~ '^[0-9]+
+        OR (CASE WHEN $2 ~ '^[0-9]+$' THEN c.id::text ELSE '' END) = $2
+     ORDER BY tp.updated_at DESC
+     LIMIT 20`,
+    [`%\${q}%`, numeric]
+  );
+  return rows;
+}
 
 async function getProgramHistory(userId: number) {
   const { rows } = await pool.query(
@@ -1089,8 +1095,8 @@ bot.callbackQuery(/^client:select:(\d+)$/, async (ctx) => {
   selectedClient.set(ctx.from.id, profileId);
   clientSearchSessions.delete(ctx.from.id);
   await ctx.answerCallbackQuery({ text: 'Клиент выбран.' });
-  const payment = await getPaymentInfo(clientId);
-  const current = await getCurrentProgram(clientId);
+  const payment = await getPaymentInfo(profileId);
+  const current = await getCurrentProgram(profileId);
   await ctx.reply(`${identityBlock(profile)}
 
 🎯 <b>${ruGoal(profile.goal)}</b>
@@ -1842,7 +1848,7 @@ bot.callbackQuery('admin:profiles', async (ctx) => {
     : 'Клиентов пока нет.';
   await ctx.reply(`👥 <b>Клиенты</b>
 
-🔎 Чтобы найти клиента, напиши его <b>username</b>, имя или Telegram ID.
+🔎 Чтобы найти клиента, напиши его <b>username</b>, имя или внутренний ID.
 
 Последние клиенты:
 
@@ -1862,9 +1868,10 @@ bot.callbackQuery('admin:search', async (ctx) => {
 bot.callbackQuery(/^client:select:(-?\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const clientId = Number(ctx.match[1]);
-  const profile = await getProfile(clientId);
+  const profileId = -clientId;
+  const profile = await getProfile(profileId);
   if (!profile) return ctx.answerCallbackQuery({ text: 'Клиент не найден.' });
-  selectedClient.set(ctx.from.id, clientId);
+  selectedClient.set(ctx.from.id, profileId);
   clientSearchSessions.delete(ctx.from.id);
   await ctx.answerCallbackQuery({ text: 'Клиент выбран.' });
   const payment = await getPaymentInfo(clientId);
