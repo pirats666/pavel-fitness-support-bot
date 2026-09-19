@@ -40,7 +40,7 @@ function addRow(out: AnatomyExercise[], row: string[], env: AnatomyExercise['env
     const id = `anat-${env}-${slug(group)}-${slug(muscle)}-${slug(name)}`;
     out.push({
       id, name, muscleGroup: group, muscle, subdivision, primaryAction,
-      environment, environmentRu, category: CATEGORY[group] ?? 'other',
+      environment: env, environmentRu, category: CATEGORY[group] ?? 'other',
       equipmentRu, notes
     });
   }
