@@ -67,6 +67,7 @@ type LibraryExercise = {
   trainingTypes: string[];
   movementPattern: string;
   level: string;
+  trainingContexts: string[];
 };
 
 type WorkoutDay = {
@@ -466,13 +467,15 @@ function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desired
 async function getLibraryExercises(profile: ProfileForProgram, version: number): Promise<LibraryExercise[]> {
   const equipmentFilter = profile.location === 'gym' || profile.location === 'mixed'
     ? `equipment <> ''`
-    : `equipment = 'body weight'`;
+    : profile.location === 'outdoor'
+      ? `equipment = 'body weight' AND COALESCE(equipment_ru, '') = 'Собственный вес'`
+      : `equipment = 'body weight'`;
 
   const { rows } = await pool.query(
     `SELECT id, name, COALESCE(name_ru,'') AS name_ru, category, COALESCE(body_part_ru,'') AS body_part_ru,
             equipment, COALESCE(equipment_ru,'') AS equipment_ru, target, muscle_group,
             COALESCE(muscle_group_ru,'') AS muscle_group_ru, secondary_muscles, instructions_ru,
-            source_url, gif_url, image_url, training_types, movement_pattern, level
+            source_url, gif_url, image_url, training_types, movement_pattern, level, training_contexts
      FROM exercise_library
      WHERE ${equipmentFilter}
        AND category IN ('upper legs','chest','back','shoulders','waist','lower legs','upper arms','lower arms','cardio')
@@ -497,7 +500,8 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
     imageUrl: String(row.image_url ?? ''),
     trainingTypes: Array.isArray(row.training_types) ? row.training_types.map(String) : ['maintenance'],
     movementPattern: String(row.movement_pattern ?? ''),
-    level: String(row.level ?? 'beginner')
+    level: String(row.level ?? 'beginner'),
+    trainingContexts: Array.isArray(row.training_contexts) ? row.training_contexts.map(String) : []
   }));
 
   const allowed = candidates.filter((row) => isExerciseAllowed(row, profile.limitations ?? ''));
@@ -868,6 +872,7 @@ async function createProgram(userId: number, correction = '') {
         equipmentRu: e.equipmentRu,
         muscleGroupRu: e.muscleGroupRu,
         trainingTypes: e.trainingTypes,
+        trainingContexts: e.trainingContexts,
         movementPattern: e.movementPattern,
         level: e.level,
         instructionsRu: e.instructionsRu
@@ -980,21 +985,65 @@ async function sendProgramText(ctx: any, text: string, replyMarkup?: InlineKeybo
 }
 
 async function sendProgramMedia(ctx: any, program: Program, replyMarkup?: InlineKeyboard) {
-  await sendProgramText(ctx, programText(program), replyMarkup);
-  const sent = new Set<string>();
-  for (const day of program.days) for (const exercise of day.exercises) {
-    const url = resolveGifUrl(exercise.gifUrl);
-    if (!url || sent.has(url)) continue;
-    sent.add(url);
-    try {
-      await ctx.replyWithAnimation(url, {
-        caption: '💪 <b>' + escapeHtml(exercise.name) + '</b>\nПодходы: <b>' + exercise.sets + '</b> · Повторения: <b>' + escapeHtml(exercise.reps) + '</b> · Отдых: <b>' + escapeHtml(exercise.rest) + '</b>',
-        parse_mode: 'HTML'
-      });
-    } catch (error) {
-      console.error('exercise gif send failed', { name: exercise.name, url, error });
+  const header = [
+    `🏋️ <b>${escapeHtml(program.title)}</b>`,
+    `🎯 Цель: <b>${escapeHtml(program.goal)}</b>`,
+    `📍 Формат: <b>${escapeHtml(program.location)}</b>`,
+    `📅 График: <b>${program.frequency} тренировки/неделю</b>`,
+    `⏱ Длительность: <b>${program.duration} мин</b>`,
+    '',
+    `📈 <b>Прогрессия программы</b>`,
+    escapeHtml(program.progression)
+  ].join('\\n');
+  await sendProgramText(ctx, header);
+
+  for (const day of program.days) {
+    await sendProgramText(ctx, [
+      '━━━━━━━━━━━━━━',
+      `🏋️ <b>${escapeHtml(day.title)}</b>`,
+      `🎯 Фокус: <b>${escapeHtml(day.focus)}</b>`,
+      '',
+      '🔥 <b>Разминка</b>',
+      escapeHtml(day.warmup)
+    ].join('\\n'));
+
+    for (let i = 0; i < day.exercises.length; i++) {
+      const exercise = day.exercises[i];
+      const exerciseText = [
+        `<b>${i + 1}. ${escapeHtml(exercise.name)}</b>`,
+        `📊 <b>Подходы:</b> ${exercise.sets} × ${escapeHtml(exercise.reps)}`,
+        exercise.recommendation
+          ? `💡 <b>Рекомендация:</b> ${escapeHtml(exercise.recommendation)}`
+          : exercise.comment
+            ? `💡 <b>Рекомендация:</b> ${escapeHtml(exercise.comment)}`
+            : ''
+      ].filter(Boolean).join('\\n');
+      await sendProgramText(ctx, exerciseText);
+
+      const url = resolveGifUrl(exercise.gifUrl);
+      if (url) {
+        try {
+          await ctx.replyWithAnimation(url);
+        } catch (error) {
+          console.error('exercise gif send failed', { name: exercise.name, url, error });
+        }
+      } else {
+        await ctx.reply('⚠️ GIF для этого упражнения отсутствует в базе.');
+      }
     }
+
+    await sendProgramText(ctx, [
+      '🧘 <b>Заминка</b>',
+      escapeHtml(day.cooldown)
+    ].join('\\n'));
   }
+
+  const notes = [
+    '━━━━━━━━━━━━━━',
+    '📝 <b>Примечания</b>',
+    ...program.notes.map((note) => '• ' + escapeHtml(note))
+  ].join('\\n');
+  await sendProgramText(ctx, notes, replyMarkup);
 }
 
 function programText(program: Program) {
