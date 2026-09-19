@@ -371,7 +371,7 @@ function ruExerciseName(name: string) {
   ];
   const hit = map.find(([pattern]) => pattern.test(n));
   if (hit) return hit[1];
-  return 'Упражнение на ' + (n.includes('chest') ? 'грудь' : n.includes('back') ? 'спину' : n.includes('shoulder') ? 'плечи' : n.includes('leg') ? 'ноги' : n.includes('abs') || n.includes('waist') ? 'мышцы кора' : 'всё тело');
+  return String(name ?? '').trim() || 'Упражнение без названия';
 }
 
 type ProfileForProgram = {
