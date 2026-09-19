@@ -104,7 +104,7 @@ async function promptAdd(ctx:Context,s:AddSession) {
   if(s.step==='note') kb=new InlineKeyboard().text('⏭ Пропустить','note:skip').row().text('❌ Отмена','client:add-cancel');
   await render(ctx,prompts[s.step],kb);
 }
-function positiveNumber(t:string) { const x=t.trim().replace(',','.'); if(!/^(?:\\d+|\\d+\\.\\d+)$/.test(x)) return null; const n=Number(x); return Number.isFinite(n)&&n>0?n:null; }
+function positiveNumber(t:string) { const x=t.trim().replace(',','.'); if(!/^(?:\d+|\d+\.\d+)$/.test(x)) return null; const n=Number(x); return Number.isFinite(n)&&n>0?n:null; }
 function complete(d:Partial<ClientDraft>): d is ClientDraft {
   return typeof d.telegram_user_id==='number' && typeof d.telegram_first_name==='string' && typeof d.age==='number' && d.age>=1 && d.age<=120
     && typeof d.height_cm==='number' && d.height_cm>0 && d.height_cm<=300
@@ -187,10 +187,18 @@ bot.on('message:text',async ctx=>{
   const uid=ctx.from.id,t=ctx.message.text.trim();
   if(t.startsWith('/'))return;
   const add=addSessions.get(uid);
+  if(add) console.info('[FSM] incoming state=%s input=%j',add.step,t);
   if(add){
-    if(add.step==='age'){const n=Number(t);if(!/^\\d+$/.test(t)||!Number.isInteger(n)||n<1||n>120)return ctx.reply('Введите возраст числом.');add.draft.age=n;add.step='height';return promptAdd(ctx,add);}
-    if(add.step==='height'){const n=positiveNumber(t);if(n===null||n>300)return ctx.reply('Введите рост числом.');add.draft.height_cm=n;add.step='weight';return promptAdd(ctx,add);}
-    if(add.step==='weight'){const n=positiveNumber(t);if(n===null||n>500)return ctx.reply('Введите вес числом.');add.draft.weight_kg=n;add.step='goal';return promptAdd(ctx,add);}
+    if(add.step==='age'){
+      console.info('[FSM] state=AGE input=%j handler=AGE',t);
+      const n=Number(t);
+      if(!/^\d+$/.test(t)||!Number.isInteger(n)||n<10||n>100){console.info('[FSM] state=AGE rejected next=AGE');return ctx.reply(n>=1&&n<=120?'Введите корректный возраст.':'Введите возраст числом.');}
+      add.draft.age=n; add.step='height';
+      console.info('[FSM] state=AGE accepted age=%d next=HEIGHT',n);
+      return promptAdd(ctx,add);
+    }
+    if(add.step==='height'){console.info('[FSM] state=HEIGHT input=%j handler=HEIGHT',t);const n=positiveNumber(t);if(n===null||n>300){console.info('[FSM] state=HEIGHT rejected next=HEIGHT');return ctx.reply('Введите рост числом.');}add.draft.height_cm=n;add.step='weight';console.info('[FSM] state=HEIGHT accepted next=WEIGHT');return promptAdd(ctx,add);}
+    if(add.step==='weight'){console.info('[FSM] state=WEIGHT input=%j handler=WEIGHT',t);const n=positiveNumber(t);if(n===null||n>500){console.info('[FSM] state=WEIGHT rejected next=WEIGHT');return ctx.reply('Введите вес числом.');}add.draft.weight_kg=n;add.step='goal';console.info('[FSM] state=WEIGHT accepted next=GOAL');return promptAdd(ctx,add);}
     if(add.step==='custom_goal'){if(!t)return ctx.reply('Введите цель текстом.');add.draft.goal=t;add.step='experience';return promptAdd(ctx,add);}
     if(add.step==='limitations_text'){if(!t)return ctx.reply('Введите ограничения текстом.');add.draft.limitations=t;add.step='note';return promptAdd(ctx,add);}
     if(add.step==='note'){add.draft.note=t||'Нет';if(complete(add.draft))return render(ctx,summary(add.draft),confirmKb());}
