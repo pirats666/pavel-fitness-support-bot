@@ -2414,7 +2414,7 @@ bot.callbackQuery('base:noop', async (ctx) => {
   await ctx.answerCallbackQuery();
 });
 
-bot.callbackQuery(/^base:page:([^:]+):(home|gym|outdoor):(\\d+)$/, async (ctx) => {
+bot.callbackQuery(/^base:page:([^:]+):(home|gym|outdoor):(\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const group = exerciseBaseGroupFromSlug(ctx.match[1]);
   const environment = exerciseBaseEnvFromSlug(ctx.match[2]);
@@ -2426,7 +2426,7 @@ bot.callbackQuery(/^base:page:([^:]+):(home|gym|outdoor):(\\d+)$/, async (ctx) =
   await showExerciseBaseList(ctx, group, environment, page);
 });
 
-bot.callbackQuery(/^base:view:([^:]+):(home|gym|outdoor):(\\d+):(\\d+)$/, async (ctx) => {
+bot.callbackQuery(/^base:view:([^:]+):(home|gym|outdoor):(\d+):(\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const group = exerciseBaseGroupFromSlug(ctx.match[1]);
   const environment = exerciseBaseEnvFromSlug(ctx.match[2]);
@@ -2455,7 +2455,7 @@ bot.callbackQuery(/^program:correct:group:(\d+):(\d+):([^:]+)$/, async (ctx) => 
   await showCorrectionExercises(ctx,programId,day,group);
 });
 
-bot.callbackQuery(/^program:correct:pick:(\\d+):(\\d+):(\\d+)$/, async (ctx) => {
+bot.callbackQuery(/^program:correct:pick:(\d+):(\\d+):(\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const programId = Number(ctx.match[1]);
   const dayNumber = Number(ctx.match[2]);
