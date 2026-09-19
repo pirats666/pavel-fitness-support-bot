@@ -171,8 +171,8 @@ bot.callbackQuery(/client:edit:(\\d+)/,async ctx=>{await ctx.answerCallbackQuery
 bot.callbackQuery(/client:delete:(\\d+)/,async ctx=>{await ctx.answerCallbackQuery();const id=Number(ctx.match[1]);await render(ctx,'Вы действительно хотите удалить клиента?\\n\\nЭто действие нельзя отменить.',new InlineKeyboard().text('❌ Нет','client:view:'+id).text('🗑 Да, удалить','client:delete-confirm:'+id));});
 bot.callbackQuery(/client:delete-confirm:(\\d+)/,async ctx=>{await ctx.answerCallbackQuery();const ok=await deleteClient(Number(ctx.match[1]));if(ok)await showClients(ctx);else await render(ctx,'Клиент уже удалён.',new InlineKeyboard().text('⬅️ К клиентам','clients'));});
 
-const editPrompts:Record<keyof ClientDraft,string>={
-  name:'Введите имя клиента:',age:'Введите возраст клиента:',height_cm:'Введите рост клиента в см:',weight_kg:'Введите текущий вес клиента в кг:',
+const editPrompts:Partial<Record<keyof ClientDraft,string>>={
+  age:'Введите возраст клиента:',height_cm:'Введите рост клиента в см:',weight_kg:'Введите текущий вес клиента в кг:',
   goal:'Выберите основную цель клиента:',experience:'Выберите тренировочный опыт:',workouts_per_week:'Сколько тренировок в неделю планируется?',
   training_location:'Где клиент будет тренироваться?',limitations:'Введите ограничения текстом:',note:'Введите дополнительную заметку:'
 };
