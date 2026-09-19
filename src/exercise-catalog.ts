@@ -205,7 +205,12 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
     const category = ex.category;
 
     const ranked = media
-      .filter((item) => item.equipment === equipment && item.category === category)
+      .filter((item) => {
+        const equipmentMatches = ex.environment === 'gym'
+          ? ['gym', 'cable'].includes(item.equipment)
+          : item.equipment === 'body weight';
+        return equipmentMatches && item.category === category;
+      })
       .map((item) => {
         const candidate = normalizeWords(item.nameRu + ' ' + item.name);
         const candidateSet = new Set(candidate);
