@@ -1532,7 +1532,7 @@ bot.on('message:text', async (ctx) => {
     const text = profiles.map((p: any, i: number) => clientSummary(p, i + 1)).join('\n\n');
     const keyboard = new InlineKeyboard();
     profiles.slice(0, 20).forEach((p: any, i: number) => {
-      keyboard.text(`${i + 1}. ${(p.telegram_username ? '@' + p.telegram_username : p.first_name || 'Клиент').slice(0, 28)}`, `client:select:${p.telegram_user_id}`).row();
+      keyboard.text(`${i + 1}. ${(p.telegram_username ? '@' + p.telegram_username : p.first_name || 'Клиент').slice(0, 28)}`, `client:select:${p.client_id}`).row();
     });
     keyboard.text('🔎 Новый поиск', 'admin:search').row().text('⬅️ Клиенты', 'admin:profiles');
     return ctx.reply(`🔎 <b>Результаты поиска</b>
