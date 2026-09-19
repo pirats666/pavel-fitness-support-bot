@@ -1407,7 +1407,7 @@ async function showExerciseBaseGroups(ctx: any) {
     kb.text(`💪 ${group}`, `base:group:${EXERCISE_BASE_GROUP_SLUG[group]}`).row();
   }
   await ctx.reply(
-    '📚 <b>Полная база упражнений</b>\\n\\n120 упражнений из нашей анатомо-тренировочной базы. Выбери мышечную группу:',
+    '📚 <b>Полная база упражнений</b>\\n\\nПолный каталог упражнений. Подбор и фильтрация зависят от места тренировки и группы мышц. Выбери мышечную группу:',
     {parse_mode:'HTML',reply_markup:kb}
   );
 }
@@ -1430,24 +1430,40 @@ async function showExerciseBaseEnvironments(ctx: any, group: string) {
 }
 
 async function showExerciseBaseList(ctx: any, group: string, environment: string) {
+  const category = ({
+    'Грудь':'chest',
+    'Спина':'back',
+    'Плечи':'shoulders',
+    'Плечевой пояс':'shoulders',
+    'Руки':'upper arms',
+    'Ноги':'upper legs',
+    'Голень':'lower legs',
+    'Кор':'waist'
+  } as Record<string,string>)[group];
+
+  const equipmentFilter = environment === 'gym'
+    ? `equipment <> 'body weight'`
+    : `equipment = 'body weight'`;
+
   const { rows } = await pool.query(
-    `SELECT id, name_ru, equipment_ru, level
+    `SELECT id, name_ru, name, equipment_ru, level
      FROM exercise_library
-     WHERE id LIKE 'base-' || $1 || '-%'
-       AND muscle_group_ru = $2
-     ORDER BY id`,
-    [environment, group]
+     WHERE category = $1
+       AND ${equipmentFilter}
+     ORDER BY name_ru NULLS LAST, name`,
+    [category]
   );
+
   const kb = new InlineKeyboard();
   for (const row of rows) {
-    const level = String(row.level) === 'intermediate' ? 'Средний' : 'Начальный';
-    const equipment = String(row.equipment_ru ?? '');
-    kb.text(`🏋️ ${String(row.name_ru ?? '').slice(0, 38)}`, `base:view:${row.id}`).row();
-    // Equipment and level are shown in the message below; buttons stay compact.
+    const name = String(row.name_ru || row.name || 'Упражнение');
+    kb.text(`🏋️ ${name.slice(0, 34)}`, `base:view:${row.id}`).row();
   }
   kb.text('⬅️ Место', `base:group:${EXERCISE_BASE_GROUP_SLUG[group]}`);
+
+  const place = environment === 'home' ? 'Дом' : environment === 'gym' ? 'Зал' : 'Спортплощадка';
   await ctx.reply(
-    `📚 <b>${escapeHtml(group)}</b> — ${environment === 'home' ? 'Дом' : environment === 'gym' ? 'Зал' : 'Спортплощадка'}\\n\\nУпражнений: ${rows.length}\\nВыбери упражнение для просмотра карточки:`,
+    `📚 <b>${escapeHtml(group)}</b> — ${place}\n\nУпражнений в полном каталоге: <b>${rows.length}</b>\nВыбери упражнение:`,
     {parse_mode:'HTML',reply_markup:kb}
   );
 }
@@ -2320,7 +2336,7 @@ bot.callbackQuery(/^base:env:([^:]+):(home|gym|outdoor)$/, async (ctx) => {
   await showExerciseBaseList(ctx, group, environment);
 });
 
-bot.callbackQuery(/^base:view:(base-[^:]+-[^:]+(?:-[^:]+)*)$/, async (ctx) => {
+bot.callbackQuery(/^base:view:(.+)$/, async (ctx) => {
   if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   await ctx.answerCallbackQuery();
   await showExerciseBaseCard(ctx, ctx.match[1]);
