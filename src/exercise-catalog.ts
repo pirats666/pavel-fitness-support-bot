@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 
-const CATALOG_VERSION = '2026-09-r2';
+const CATALOG_VERSION = '2026-09-r3';
 const SOURCE_JSON = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/data/exercises.json';
 const MEDIA_BASE = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/';
 
@@ -154,9 +154,30 @@ function trainingTypes(name: string, category: string, equipment: string, target
   return [...types];
 }
 
+function trainingContexts(name: string, category: string, equipment: string, target: string, muscleGroup: string, movement: string) {
+  const text = norm([name, category, target, muscleGroup, movement].join(' '));
+  const bodyweight = equipment === 'body weight';
+  const fullBody = bodyweight && (
+    /squat|lunge|step-up|push-up|push up|pull-up|pull up|burpee|mountain climber|jumping jack|high knees|bear crawl|crawl|farmer|carry/.test(text) ||
+    ['приседание','горизонтальный жим','вертикальная тяга','кардио'].includes(movement)
+  );
+  const contexts = new Set<string>();
+  if (fullBody) contexts.add('full_body');
+  if (fullBody || /carry|squat|lunge|hinge|push|pull|press|row|crawl|rotation|координац/.test(text)) contexts.add('functional');
+  if (
+    bodyweight &&
+    /arm circle|shoulder circle|march|walk|step|lunge|squat|mobility|stretch|dynamic|jumping jack|high knees|rotation|dead bug|bird dog|легк|мобил|растяж/.test(text)
+  ) contexts.add('warmup');
+  if (bodyweight && !/barbell|dumbbell|machine|cable|kettlebell|band/.test(text)) contexts.add('home');
+  if (bodyweight && /pull-up|pull up|chin-up|dip|bar|hanging|подтяг|брусь/.test(text)) contexts.add('outdoor');
+  if (bodyweight && fullBody) contexts.add('outdoor');
+  return [...contexts];
+}
+
 export async function syncExerciseCatalog(pool: Pool) {
   const metaTable = 'exercise_catalog_meta';
   await pool.query('CREATE TABLE IF NOT EXISTS exercise_catalog_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  await pool.query("ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS training_contexts JSONB NOT NULL DEFAULT '[]'::jsonb");
   const meta = await pool.query('SELECT value FROM exercise_catalog_meta WHERE key=$1', ['version']);
   if (meta.rows[0]?.value === CATALOG_VERSION) return;
 
@@ -175,6 +196,7 @@ export async function syncExerciseCatalog(pool: Pool) {
     const mediaId = String(ex.media_id ?? '');
     const gifUrl = mediaId ? MEDIA_BASE + 'videos/' + id + '-' + mediaId + '.gif' : '';
     const imageUrl = mediaId ? MEDIA_BASE + 'images/' + id + '-' + mediaId + '.jpg' : '';
+    const movement = movementPattern(name, category, target);
 
     await pool.query(
       `UPDATE exercise_library SET
@@ -182,13 +204,14 @@ export async function syncExerciseCatalog(pool: Pool) {
         training_types=$6::jsonb, movement_pattern=$7, level=$8, media_id=$9,
         gif_url=CASE WHEN $10<>'' THEN $10 ELSE gif_url END,
         image_url=CASE WHEN $11<>'' THEN $11 ELSE image_url END,
-        attribution=$12, catalog_version=$13
+        attribution=$12, catalog_version=$13, training_contexts=$14::jsonb
        WHERE id=$1`,
       [
         id, nameRu(name), bodyPartRu(category), equipmentRu(equipment), muscleRu(muscleGroup,target),
         JSON.stringify(trainingTypes(name,category,equipment,target,muscleGroup)),
-        movementPattern(name,category,target), level(name,target), mediaId,
-        gifUrl, imageUrl, '© Gym visual — https://gymvisual.com/', CATALOG_VERSION
+        movement, level(name,target), mediaId,
+        gifUrl, imageUrl, '© Gym visual — https://gymvisual.com/', CATALOG_VERSION,
+        JSON.stringify(trainingContexts(name,category,equipment,target,muscleGroup,movement))
       ]
     );
   }
