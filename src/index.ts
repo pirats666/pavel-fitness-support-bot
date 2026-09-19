@@ -143,7 +143,9 @@ function displayUsername(profile: any) {
 
 function identityBlock(profile: any) {
   const id = Number(profile?.telegram_user_id ?? 0);
-  const idLine = id < 0 ? `🆔 ID клиента: <code>${Math.abs(id)}</code>` : `🆔 внутренний ID: <code>${profile?.telegram_user_id ?? '—'}</code>`;
+  const idLine = id < 0
+    ? `🆔 ID клиента: <code>${Math.abs(id)}</code>`
+    : `🆔 внутренний ID: <code>${profile?.telegram_user_id ?? '—'}</code>`;
   return `👤 <b>${displayUsername(profile)}</b>\n${idLine}`;
 }
 
@@ -962,9 +964,24 @@ async function getAdminStats() {
 
 async function getRecentProfiles() {
   const { rows } = await pool.query(`
-    SELECT telegram_user_id, telegram_username, first_name, goal, experience, location, workouts_per_week, workout_duration,
-           payment_amount, training_sessions_total, training_sessions_remaining, updated_at
-    FROM trainer_profiles ORDER BY updated_at DESC LIMIT 20
+    SELECT
+      c.id AS client_id,
+      p.telegram_user_id,
+      c.telegram_username,
+      c.first_name,
+      p.goal,
+      p.experience,
+      p.location,
+      p.workouts_per_week,
+      p.workout_duration,
+      p.payment_amount,
+      p.training_sessions_total,
+      p.training_sessions_remaining,
+      p.updated_at
+    FROM clients c
+    JOIN trainer_profiles p ON p.telegram_user_id = -c.id
+    ORDER BY p.updated_at DESC
+    LIMIT 20
   `);
   return rows;
 }
@@ -973,14 +990,26 @@ async function searchClients(query: string) {
   const q = query.trim().replace(/^@/, '');
   if (!q) return [];
   const { rows } = await pool.query(
-    `SELECT telegram_user_id, telegram_username, first_name, goal, experience, location,
-            workouts_per_week, workout_duration, payment_amount, training_sessions_total,
-            training_sessions_remaining, updated_at
-     FROM trainer_profiles
-     WHERE LOWER(COALESCE(telegram_username, '')) LIKE LOWER($1)
-        OR LOWER(COALESCE(first_name, '')) LIKE LOWER($1)
-        OR CAST(telegram_user_id AS TEXT) = $2
-     ORDER BY updated_at DESC
+    `SELECT
+       c.id AS client_id,
+       p.telegram_user_id,
+       c.telegram_username,
+       c.first_name,
+       p.goal,
+       p.experience,
+       p.location,
+       p.workouts_per_week,
+       p.workout_duration,
+       p.payment_amount,
+       p.training_sessions_total,
+       p.training_sessions_remaining,
+       p.updated_at
+     FROM clients c
+     JOIN trainer_profiles p ON p.telegram_user_id = -c.id
+     WHERE LOWER(COALESCE(c.telegram_username, '')) LIKE LOWER($1)
+        OR LOWER(COALESCE(c.first_name, '')) LIKE LOWER($1)
+        OR CAST(c.id AS TEXT) = $2
+     ORDER BY p.updated_at DESC
      LIMIT 20`,
     [`%${q}%`, q]
   );
@@ -1139,8 +1168,8 @@ bot.callbackQuery(/^client:select:(\d+)$/, async (ctx) => {
   selectedClient.set(ctx.from.id, profileId);
   clientSearchSessions.delete(ctx.from.id);
   await ctx.answerCallbackQuery({ text: 'Клиент выбран.' });
-  const payment = await getPaymentInfo(clientId);
-  const current = await getCurrentProgram(clientId);
+  const payment = await getPaymentInfo(profileId);
+  const current = await getCurrentProgram(profileId);
   await ctx.reply(`${identityBlock(profile)}
 
 🎯 <b>${ruGoal(profile.goal)}</b>
@@ -1669,6 +1698,13 @@ bot.callbackQuery('program:history', async (ctx) => {
   await ctx.reply('📚 История программ\n\n' + rows.map((r: any) =>
     `Версия ${r.version} — ${r.status === 'approved' ? 'подтверждена' : r.status === 'archived' ? 'архив' : 'черновик'}\nСоздана: ${new Date(r.created_at).toLocaleString('ru-RU')}${r.correction_request ? `\nКоррекция: ${r.correction_request}` : ''}`
   ).join('\n\n'));
+});
+
+// Always acknowledge callback queries that are not matched by a handler.
+// This prevents Telegram's loading indicator from hanging on stale/invalid buttons.
+bot.on('callback_query:data', async (ctx) => {
+  console.warn('Unhandled callback query:', ctx.callbackQuery.data);
+  await ctx.answerCallbackQuery({ text: 'Кнопка устарела. Открой раздел заново.' });
 });
 
 bot.catch((error) => console.error('Telegram bot error', error.error));
