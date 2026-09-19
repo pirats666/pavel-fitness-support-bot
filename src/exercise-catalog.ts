@@ -260,6 +260,23 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
     [ANATOMY_CATALOG_VERSION]
   );
+
+  // Existing programs were generated from the previous mixed catalog.
+  // On the first startup with the workbook catalog, invalidate them once so
+  // the trainer never reopens a stale program after this migration.
+  const programVersion = await pool.query(
+    `SELECT value FROM exercise_catalog_meta WHERE key='program_source_version'`
+  );
+  if (programVersion.rows[0]?.value !== ANATOMY_CATALOG_VERSION) {
+    await pool.query('DELETE FROM training_programs');
+    await pool.query(
+      `INSERT INTO exercise_catalog_meta(key,value) VALUES('program_source_version',$1)
+       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
+      [ANATOMY_CATALOG_VERSION]
+    );
+    console.log('Old training programs invalidated for workbook catalog migration');
+  }
+
   console.log('Training workbook catalog synchronized:', ANATOMY_EXERCISES.length);
 }
 
