@@ -1268,21 +1268,25 @@ async function showCorrectionGroups(ctx: any, programId: number, dayNumber: numb
   if (!rows[0]) return ctx.reply('Программа не найдена.');
   const program = rows[0].program as Program;
   const groups = correctionGroupsForDay(program, dayNumber);
-  const kb = new InlineKeyboard();
-  for (const group of groups) kb.text(`💪 ${group}`, `program:correct:group:${programId}:${dayNumber}:${correctionGroupSlug(group)}`).row();
-  kb.text('⬅️ Дни', `program:correct:days:${programId}`);
-  await ctx.reply(`🏋️ <b>День ${dayNumber}</b>\n\nВыбери группу мышц:`, {parse_mode:'HTML',reply_markup:kb});
-}
+  const userId = ctx.from?.id ?? 0;
+  const pending = pendingCorrections.get(userId);
+  const selections = pending?.programId === programId && pending.day === dayNumber ? pending.selections : {};
 
-type PendingCorrection = {
-  programId: number;
-  day: number;
-  group: string;
-  exerciseIndex: number;
-  selectedExerciseId?: string;
-  selectedExerciseName?: string;
-};
-const pendingCorrections = new Map<number, PendingCorrection>();
+  const kb = new InlineKeyboard();
+  for (const group of groups) {
+    const mark = selections[group] ? '✅ ' : '';
+    kb.text(`${mark}💪 ${group}`, `program:correct:group:${programId}:${dayNumber}:${correctionGroupSlug(group)}`).row();
+  }
+  if (Object.keys(selections).length) {
+    kb.text('🔄 Обновить программу', `program:correct:apply:${programId}`).row();
+  }
+  kb.text('⬅️ Дни', `program:correct:days:${programId}`);
+
+  await ctx.reply(
+    `🏋️ <b>День ${dayNumber}</b>\n\nВыбери одну или несколько групп.\nПосле выбора упражнений нажми «🔄 Обновить программу» — до этого программа не изменится.`,
+    {parse_mode:'HTML',reply_markup:kb}
+  );
+}
 
 async function showCorrectionExercises(ctx: any, programId: number, dayNumber: number, group: string) {
   const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
@@ -1323,28 +1327,30 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
   if (targetExerciseIndex < 0) return ctx.reply('В выбранном дне нет упражнения этой группы.');
 
   const userId = ctx.from?.id ?? 0;
-  const pending = pendingCorrections.get(userId);
-  const currentSelection = pending?.programId === programId && pending.day === dayNumber && pending.group === group
-    ? pending.selectedExerciseId
-    : undefined;
+  const existing = pendingCorrections.get(userId);
+  const pending: PendingCorrection = existing?.programId === programId && existing.day === dayNumber
+    ? existing
+    : {programId, day: dayNumber, selections: {}};
+  pendingCorrections.set(userId, pending);
 
+  const selectedId = pending.selections[group];
   const kb = new InlineKeyboard();
   unique.forEach((row, index) => {
     const name = row.nameRu || ruExerciseName(row.name);
-    const mark = currentSelection === row.id ? '✅ ' : '';
+    const mark = selectedId === row.id ? '✅ ' : '';
     kb.text(`${mark}🏋️ ${name.slice(0, 30)}`, `program:correct:pick:${programId}:${dayNumber}:${index}`).row();
   });
-  kb.text('🔄 Обновить программу', `program:correct:apply:${programId}`);
-  kb.text('⬅️ Группы', `program:correct:day:${programId}:${dayNumber}`);
+  kb.text('⬅️ К группам', `program:correct:day:${programId}:${dayNumber}`);
 
-  pendingCorrections.set(userId, {
-    programId, day: dayNumber, group,
-    exerciseIndex: targetExerciseIndex,
-    selectedExerciseId: currentSelection
+  correctionSessions.set(userId, {
+    programId,
+    day: dayNumber,
+    muscleGroup: group,
+    catalogChoices: unique.map((row) => row.id)
   });
 
   await ctx.reply(
-    `💪 <b>${escapeHtml(group)}</b>\n\nВыбери упражнение для замены. Выбранное пока <b>не изменяет программу</b>.\n\nПосле выбора нажми «🔄 Обновить программу».`,
+    `💪 <b>${escapeHtml(group)}</b>\n\nВыбери новое упражнение. Оно будет только отмечено.\nПрограмма изменится только после нажатия «🔄 Обновить программу».`,
     {parse_mode:'HTML',reply_markup:kb}
   );
 }
@@ -2302,21 +2308,78 @@ bot.callbackQuery(/^program:correct:pick:(\\d+):(\\d+):(\\d+)$/, async (ctx) => 
     return ctx.answerCallbackQuery({ text: 'Список упражнений устарел. Открой коррекцию заново.' });
   }
 
+  const group = session.muscleGroup ?? '';
   const exerciseId = session.catalogChoices[index];
-  const exerciseName = session.catalogChoices[index];
-  const pending = pendingCorrections.get(ctx.from.id);
-  if (!pending || pending.programId !== programId || pending.day !== dayNumber || pending.group !== (session.muscleGroup ?? '')) {
-    return ctx.answerCallbackQuery({ text: 'Открой выбор упражнения заново.' });
-  }
+  const existing = pendingCorrections.get(ctx.from.id);
+  const pending: PendingCorrection = existing?.programId === programId && existing.day === dayNumber
+    ? existing
+    : {programId, day: dayNumber, selections: {}};
 
-  pending.selectedExerciseId = exerciseId;
-  pending.selectedExerciseName = exerciseName;
+  pending.selections[group] = exerciseId;
   pendingCorrections.set(ctx.from.id, pending);
   await ctx.answerCallbackQuery({ text: 'Выбрано. Программа пока не изменена.' });
-
-  const group = pending.group;
-  await showCorrectionExercises(ctx, programId, dayNumber, group);
+  await showCorrectionGroups(ctx, programId, dayNumber);
 });
+
+bot.callbackQuery(/^program:correct:apply:(\\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const programId = Number(ctx.match[1]);
+  const pending = pendingCorrections.get(ctx.from.id);
+  if (!pending || pending.programId !== programId || !Object.keys(pending.selections).length) {
+    return ctx.answerCallbackQuery({ text: 'Сначала выбери упражнения.' });
+  }
+
+  const programRow = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
+  const current = programRow.rows[0]?.program as Program | undefined;
+  if (!current) return ctx.answerCallbackQuery({ text: 'Программа не найдена.' });
+
+  const nextProgram: Program = {
+    ...current,
+    days: current.days.map((d) => ({
+      ...d,
+      exercises: d.exercises.map((e) => ({ ...e }))
+    }))
+  };
+  const nextDay = nextProgram.days.find((d) => d.day === pending.day);
+  if (!nextDay) return ctx.answerCallbackQuery({ text: 'День не найден.' });
+
+  for (const [group, exerciseId] of Object.entries(pending.selections)) {
+    const targetIndex = nextDay.exercises.findIndex((exercise) =>
+      exercise.muscleGroup === group ||
+      exerciseMuscleGroup(exercise.name, nextDay.focus) === group
+    );
+    if (targetIndex < 0) continue;
+
+    const exRow = await pool.query(
+      `SELECT id, name, COALESCE(name_ru,'') AS name_ru, COALESCE(movement_pattern,'') AS movement_pattern, gif_url
+       FROM exercise_library WHERE id=$1 AND id LIKE 'base-%'`,
+      [exerciseId]
+    );
+    const selectedExercise = exRow.rows[0];
+    if (!selectedExercise) continue;
+
+    const old = nextDay.exercises[targetIndex];
+    nextDay.exercises[targetIndex] = {
+      ...old,
+      id: String(selectedExercise.id),
+      muscleGroup: group,
+      movementPattern: String(selectedExercise.movement_pattern ?? ''),
+      name: String(selectedExercise.name_ru || ruExerciseName(selectedExercise.name)),
+      gifUrl: String(selectedExercise.gif_url || '')
+    };
+  }
+
+  await pool.query(
+    `UPDATE training_programs SET program=$1::jsonb, updated_at=NOW() WHERE id=$2`,
+    [JSON.stringify(nextProgram), programId]
+  );
+
+  pendingCorrections.delete(ctx.from.id);
+  correctionSessions.delete(ctx.from.id);
+  await ctx.answerCallbackQuery({ text: 'Программа обновлена.' });
+  return sendProgramMedia(ctx, nextProgram, programKeyboard(programId));
+});
+
 
 bot.callbackQuery(/^program:correct:apply:(\\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
