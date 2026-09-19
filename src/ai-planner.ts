@@ -123,6 +123,16 @@ function catalogText(exercises: AIExerciseCandidate[]) {
 }
 
 function buildInstructions(profile: AIPlannerProfile, exercises: AIExerciseCandidate[], correction: string, allExerciseNames: string[]) {
+  // Hard separation by training location:
+  // gym programs must use gym-resistance modalities, not the same bodyweight pool as outdoor.
+  const planningExercises = profile.location === 'gym'
+    ? exercises.filter((e) => e.equipmentRu !== 'Собственный вес')
+    : exercises;
+
+  if (profile.location === 'gym' && planningExercises.length < 4) {
+    throw new Error('Not enough gym-specific exercises in the planning catalog');
+  }
+
   const methods = [
     'full body',
     'upper/lower',
@@ -222,6 +232,8 @@ function buildInstructions(profile: AIPlannerProfile, exercises: AIExerciseCandi
     'Разминка должна быть отдельным блоком перед основной частью. Для неё приоритетны упражнения с контекстом warmup: динамичные, контролируемые, без утомления.',
     'Упражнение с контекстом full_body должно быть доступно одновременно для функциональной тренировки и, если оно соответствует интенсивности, для разминки.',
     'Для домашней программы используй упражнения с контекстом home; для спортивной площадки — с контекстом outdoor. Не подменяй эти контексты обычными упражнениями из зала.',
+    'ЖЁСТКОЕ ПРАВИЛО ДЛЯ ЗАЛА: если location = gym, основная программа должна использовать упражнения с реальным сопротивлением/оборудованием зала: гантели, штанги, кабели, силовые тренажёры, тренажёры Смита, гири и другие доступные силовые устройства. Не используй упражнения, где equipmentRu = «Собственный вес».',
+    'ЗАЛ И УЛИЦА НЕ ДОЛЖНЫ ПОЛУЧАТЬ ОДИНАКОВУЮ ПРОГРАММУ ТОЛЬКО ИЗ-ЗА СХОЖЕСТИ ДВИЖЕНИЙ: для зала используй преимущества доступного оборудования и меняй упражнение/модальность, а не только название.',
     ...locationRules,
     'Формат может быть одним из: ' + methods.join(', ') + '.',
     'Поддерживаемые модальности: ' + modalities.join(', ') + '.',
@@ -242,7 +254,7 @@ function buildInstructions(profile: AIPlannerProfile, exercises: AIExerciseCandi
     allExerciseNames.length ? allExerciseNames.map((name, i) => `${i + 1}. ${name}`).join('\\n') : 'список не передан',
     '',
     'ДОСТУПНЫЕ УПРАЖНЕНИЯ С ID:',
-    catalogText(exercises),
+    catalogText(planningExercises),
     '',
     correction ? 'КОРРЕКЦИЯ ПРЕДЫДУЩЕЙ ВЕРСИИ: ' + correction : 'Это первая версия программы.',
     '',
@@ -279,6 +291,13 @@ function validatePlan(plan: AIWorkoutPlan, profile: AIPlannerProfile, catalog: A
     }
     for (const ex of day.exercises) {
       if (!allowed.has(ex.exerciseId)) throw new Error('AI selected an unknown exercise');
+      const selected = catalog.find((item) => item.id === ex.exerciseId);
+      if (profile.location === 'gym' && selected?.equipmentRu === 'Собственный вес') {
+        throw new Error('AI selected a bodyweight-only exercise for a gym program');
+      }
+      if (profile.location === 'outdoor' && selected?.equipmentRu !== 'Собственный вес') {
+        throw new Error('AI selected non-bodyweight exercise for an outdoor program');
+      }
       if (!Number.isInteger(ex.sets) || ex.sets < 1 || ex.sets > 6) throw new Error('AI returned invalid sets');
       seen.add(ex.exerciseId);
     }
