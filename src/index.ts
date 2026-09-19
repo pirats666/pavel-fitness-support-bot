@@ -583,7 +583,7 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number, 
 }
 
 function exerciseProgression(profile: ProfileForProgram, reps: string) {
-  const upper = reps.match(/(\\d+)\\s*[–-]\\s*(\\d+)/);
+  const upper = reps.match(/(\d+)\\s*[–-]\\s*(\d+)/);
   if (upper) {
     return `Когда верхняя граница диапазона выполняется во всех подходах с чистой техникой, постепенно увеличивать нагрузку и снова работать с нижней границы диапазона.`;
   }
@@ -2455,7 +2455,7 @@ bot.callbackQuery(/^program:correct:group:(\d+):(\d+):([^:]+)$/, async (ctx) => 
   await showCorrectionExercises(ctx,programId,day,group);
 });
 
-bot.callbackQuery(/^program:correct:pick:(\d+):(\\d+):(\d+)$/, async (ctx) => {
+bot.callbackQuery(/^program:correct:pick:(\d+):(\d+):(\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const programId = Number(ctx.match[1]);
   const dayNumber = Number(ctx.match[2]);
