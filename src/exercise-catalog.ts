@@ -200,77 +200,45 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
     .split(/\s+/)
     .filter((word) => word.length >= 3 && !['для','на','по','с','и','или','the','with','one'].includes(word));
 
-  const mediaForExercise = (ex: typeof ANATOMY_EXERCISES[number]) => {
-    const wanted = normalizeWords(ex.name);
-    const wantedText = wanted.join(' ');
+const mediaForExercise = (ex: typeof ANATOMY_EXERCISES[number]) => {
+    const explicit: Record<string, string> = {
+      'Жим штанги лёжа': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0025-EIeI8Vf.gif',
+      'Жим гантелей лёжа': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0289-vi8EhoE.gif',
+      'Жим штанги под наклоном 30–45°': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0047-Hj4FOCd.gif',
+      'Жим гантелей под наклоном 30–45°': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0314-ns0SIbU.gif',
+      'Тяга штанги': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0027-eZyBC3j.gif',
+      'Тяга верхнего блока одной рукой': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/3563-U5INZY6.gif',
+      'Тяга гантели': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0293-BJ0Hz5L.gif',
+      'Тяга гантелей': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0293-BJ0Hz5L.gif',
+      'Жим гантелей над головой': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0405-znQUdHY.gif',
+      'Жим гантелей/штанги': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0405-znQUdHY.gif',
+      'Жим в тренажёре': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0219-PzQanLE.gif',
+      'Отжимания': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/3327-gw9PqGk.gif',
+      'Разведения на заднюю дельту': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0669-xifhB5W.gif',
+      'Тяга верхнего блока': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/2330-LEprlgG.gif',
+      'Пуловер на блоке': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0238-x69MAlq.gif',
+      'Тяга к поясу': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0027-eZyBC3j.gif',
+      'Тяга гантелей к поясу': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0293-BJ0Hz5L.gif',
+      'Приседание с гантелями + жим': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/3305-f7Y9eDZ.gif'
+    };
+    const direct = explicit[ex.name];
+    if (direct) return { gifUrl: direct, imageUrl: '' };
+
+    const normalize = (v: string) => String(v ?? '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/gi, ' ').trim();
+    const wanted = normalize(ex.name);
     const equipment = ex.environment === 'gym' ? 'gym' : 'body weight';
-    const category = ex.category;
 
-    const ranked = media
-      .filter((item) => {
-        const equipmentMatches = ex.environment === 'gym'
-          ? item.equipment !== 'body weight'
-          : item.equipment === 'body weight';
-        return equipmentMatches && item.category === category;
-      })
-      .map((item) => {
-        const candidate = normalizeWords(item.nameRu + ' ' + item.name);
-        const candidateSet = new Set(candidate);
-        const itemText = (item.nameRu + ' ' + item.name + ' ' + item.target + ' ' + item.muscleGroup).toLowerCase();
-        let score = 0;
+    // Never use semantic/fuzzy matching for media. A plausible-looking GIF is worse than
+    // no GIF because it can silently demonstrate a different exercise.
+    const exact = media.find((item) => {
+      if (ex.environment === 'gym') {
+        if (item.equipment === 'body weight') return false;
+      } else if (item.equipment !== 'body weight') return false;
+      if (item.category !== ex.category) return false;
+      return normalize(item.nameRu || item.name) === wanted || normalize(item.name) === wanted;
+    });
 
-        const exText = (ex.name + ' ' + ex.muscle + ' ' + ex.primaryAction).toLowerCase();
-        const semanticRules: Array<[RegExp, RegExp]> = [
-          [/step[- ]?up|зашаг/, /step[- ]?up|зашаг/],
-          [/good morning/, /good morning/],
-          [/tibialis|передняя большеберцовая/, /tibialis|toe raise|dorsiflex|передн/],
-          [/push[- ]?up plus|протракц|передняя зубчатая/, /push[- ]?up plus|scapula|serratus|протракц/],
-          [/pallof|anti-extension/, /pallof|anti[- ]extension|anti extension/],
-          [/copenhagen|приводящ/, /copenhagen|adductor|приводящ/],
-          [/scapul|лопат/, /scapul|лопат|shoulder blade/],
-          [/rotation|ротац/, /rotation|rotational|ротац/],
-          [/carry|переноск|фермер/, /carry|farmer|переноск|фермер/],
-          [/dip|брусь/, /dip|triceps dip|брусь/],
-          [/hanging|вис/, /hanging|hang|вис/],
-          [/row|тяга/, /row|pull|тяга/],
-          [/lunge|выпад/, /lunge|выпад/],
-          [/squat|присед/, /squat|присед/],
-          [/calf|икронож|камбаловид/, /calf|soleus|икронож|камбал/],
-          [/shoulder|дельт|плеч/, /shoulder|deltoid|raise|плеч|дельт/],
-          [/biceps|бицепс/, /biceps|curl|бицепс/],
-          [/triceps|трицепс/, /triceps|extension|pushdown|трицепс/]
-        ];
-
-        if (item.nameRu && item.nameRu.toLowerCase() === ex.name.toLowerCase()) score += 100;
-        for (const word of wanted) if (candidateSet.has(word)) score += 8;
-
-        if (/жим/.test(wantedText) && /press|жим/.test(itemText)) score += 8;
-        if (/тяга|подтяг/.test(wantedText) && /row|pull|тяга|подтяг/.test(itemText)) score += 8;
-        if (/присед|выпад|зашаг/.test(wantedText) && /squat|lunge|step|присед|выпад/.test(itemText)) score += 8;
-        if (/сгиб|бицепс/.test(wantedText) && /curl|сгиб|бицепс/.test(itemText)) score += 8;
-        if (/разгиб|трицепс/.test(wantedText) && /extension|pushdown|разгиб|трицепс/.test(itemText)) score += 8;
-        if (/икр|голен/.test(wantedText) && /calf|голен|икр/.test(itemText)) score += 8;
-        if (/пресс|кор|скруч|подъ[её]м/.test(wantedText) && /abs|crunch|sit|raise|кор|пресс|скруч/.test(itemText)) score += 8;
-        if (/плеч|дельт|face pull|мах/.test(wantedText) && /shoulder|deltoid|face pull|raise|плеч|дельт|мах/.test(itemText)) score += 8;
-        if (/ягод|glute/.test(wantedText) && /glute|hip|ягод/.test(itemText)) score += 8;
-        for (const [wantedRule, candidateRule] of semanticRules) {
-          if (wantedRule.test(exText) && candidateRule.test(itemText)) score += 12;
-        }
-
-        if (ex.environment === 'gym') {
-          if (/блок|cable/.test(exText) && item.equipment === 'cable') score += 10;
-          if (/гантел|dumbbell/.test(exText) && item.equipment === 'dumbbell') score += 10;
-          if (/штанг|barbell/.test(exText) && item.equipment === 'barbell') score += 10;
-          if (/тренаж|machine/.test(exText) && /machine|leverage|smith|cable/.test(item.equipment)) score += 6;
-        }
-
-        return { ...item, score };
-      })
-      .sort((a, b) => b.score - a.score)[0];
-
-    return ranked && ranked.score >= 8
-      ? { gifUrl: ranked.gifUrl, imageUrl: ranked.imageUrl }
-      : { gifUrl: '', imageUrl: '' };
+    return exact ? { gifUrl: exact.gifUrl, imageUrl: exact.imageUrl } : { gifUrl: '', imageUrl: '' };
   };
 
   for (const ex of ANATOMY_EXERCISES) {
