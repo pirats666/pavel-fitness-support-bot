@@ -3,6 +3,7 @@ import { ANATOMY_EXERCISES, ANATOMY_CATALOG_VERSION } from './anatomy-exercise-c
 
 const CATALOG_VERSION = '2026-09-r4';
 const SOURCE_JSON = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/data/exercises.json';
+const MEDIA_BASE = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/';
 
 function norm(value: string) {
   return String(value ?? '').toLowerCase().replace(/ё/g, 'е').trim();
@@ -256,7 +257,10 @@ export async function syncExerciseCatalog(pool: Pool) {
   await pool.query("ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS training_contexts JSONB NOT NULL DEFAULT '[]'::jsonb");
   await pool.query("ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS gif_verified BOOLEAN NOT NULL DEFAULT FALSE");
   const meta = await pool.query('SELECT value FROM exercise_catalog_meta WHERE key=$1', ['version']);
-  if (meta.rows[0]?.value === CATALOG_VERSION) return;
+  if (meta.rows[0]?.value === CATALOG_VERSION) {
+    await pool.query(`UPDATE exercise_library SET gif_url='', image_url='', gif_verified=FALSE`);
+    return;
+  }
 
   const response = await fetch(SOURCE_JSON, { signal: AbortSignal.timeout(45000) });
   if (!response.ok) throw new Error(`Exercise catalog HTTP ${response.status}`);
@@ -271,16 +275,15 @@ export async function syncExerciseCatalog(pool: Pool) {
     const target = String(ex.target ?? '');
     const muscleGroup = String(ex.muscle_group ?? '');
     const mediaId = String(ex.media_id ?? '');
-    const gifUrl = mediaId ? MEDIA_BASE + 'videos/' + id + '-' + mediaId + '.gif' : '';
-    const imageUrl = mediaId ? MEDIA_BASE + 'images/' + id + '-' + mediaId + '.jpg' : '';
+    const gifUrl = '';
+    const imageUrl = '';
     const movement = movementPattern(name, category, target);
 
     await pool.query(
       `UPDATE exercise_library SET
         name_ru=$2, body_part_ru=$3, equipment_ru=$4, muscle_group_ru=$5,
         training_types=$6::jsonb, movement_pattern=$7, level=$8, media_id=$9,
-        gif_url=CASE WHEN $10<>'' THEN $10 ELSE gif_url END,
-        image_url=CASE WHEN $11<>'' THEN $11 ELSE image_url END,
+        gif_url='', image_url='', gif_verified=FALSE,
         attribution=$12, catalog_version=$13, training_contexts=$14::jsonb
        WHERE id=$1`,
       [
@@ -298,5 +301,6 @@ export async function syncExerciseCatalog(pool: Pool) {
      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
     [CATALOG_VERSION]
   );
+  await pool.query(`UPDATE exercise_library SET gif_url='', image_url='', gif_verified=FALSE`);
   console.log('Exercise catalog synchronized:', data.length);
 }
