@@ -176,60 +176,61 @@ function trainingContexts(name: string, category: string, equipment: string, tar
 }
 
 export async function syncAnatomyExerciseCatalog(pool: Pool) {
-  for (const ex of ANATOMY_EXERCISES) {
-    const media = await pool.query(
-      `SELECT gif_url, image_url
-       FROM exercise_library
-       WHERE id NOT LIKE 'anat-%'
-         AND gif_url <> ''
-         AND (
-           lower(COALESCE(name_ru, '')) = lower($1)
-           OR lower(COALESCE(name, '')) = lower($1)
-           OR lower(COALESCE(name_ru, '')) LIKE lower($2)
-         )
-       ORDER BY CASE WHEN lower(COALESCE(name_ru, '')) = lower($1) THEN 0 ELSE 1 END, id
-       LIMIT 1`,
-      [ex.name, '%' + ex.name + '%']
-    );
-    const gifUrl = String(media.rows[0]?.gif_url ?? '');
-    const imageUrl = String(media.rows[0]?.image_url ?? '');
+  const mediaRows = await pool.query(
+    `SELECT name, COALESCE(name_ru, '') AS name_ru, equipment, category, gif_url, image_url
+     FROM exercise_library
+     WHERE id NOT LIKE 'anat-%' AND gif_url <> ''`
+  );
 
-    await pool.query(
-      `INSERT INTO exercise_library
-        (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url,
-         gif_url,image_url,name_ru,body_part_ru,equipment_ru,muscle_group_ru,training_types,movement_pattern,level,
-         catalog_version,training_contexts)
-       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,$15,$16,$2,$9,$10,$11,'["maintenance","strength","hypertrophy"]'::jsonb,$12,'beginner',$13,$14::jsonb)
-       ON CONFLICT (id) DO UPDATE SET
-         name=EXCLUDED.name,
-         category=EXCLUDED.category,
-         equipment=EXCLUDED.equipment,
-         target=EXCLUDED.target,
-         muscle_group=EXCLUDED.muscle_group,
-         instructions_ru=EXCLUDED.instructions_ru,
-         name_ru=EXCLUDED.name_ru,
-         body_part_ru=EXCLUDED.body_part_ru,
-         equipment_ru=EXCLUDED.equipment_ru,
-         muscle_group_ru=EXCLUDED.muscle_group_ru,
-         movement_pattern=EXCLUDED.movement_pattern,
-         catalog_version=EXCLUDED.catalog_version,
-         training_contexts=EXCLUDED.training_contexts`,
-      [
-        ex.id, ex.name, ex.category,
-        ex.environment === 'gym' ? (ex.equipmentRu === 'Блок' ? 'cable' : 'gym') : 'body weight',
-        ex.muscle, ex.muscle,
-        ex.notes,
-        'anatomo-training-database',
-        ex.muscleGroup, ex.equipmentRu, ex.muscle,
-        ex.primaryAction, ANATOMY_CATALOG_VERSION,
-        gifUrl, imageUrl,
-        JSON.stringify([
-          ex.environment === 'home' ? 'home' : ex.environment === 'outdoor' ? 'outdoor' : 'gym',
-          ...(ex.environment === 'outdoor' ? ['functional'] : [])
-        ])
-      ]
-    );
-  }
+  const media = mediaRows.rows.map((row: any) => ({
+    name: String(row.name ?? ''),
+    nameRu: String(row.name_ru ?? ''),
+    equipment: String(row.equipment ?? ''),
+    category: String(row.category ?? ''),
+    gifUrl: String(row.gif_url ?? ''),
+    imageUrl: String(row.image_url ?? '')
+  }));
+
+  const normalizeWords = (value: string) => String(value ?? '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^a-zа-я0-9]+/gi, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length >= 3 && !['для','на','по','с','и','или','the','with','one'].includes(word));
+
+  const mediaForExercise = (ex: typeof ANATOMY_EXERCISES[number]) => {
+    const wanted = normalizeWords(ex.name);
+    const wantedText = wanted.join(' ');
+    const equipment = ex.environment === 'gym' ? 'gym' : 'body weight';
+    const category = ex.category;
+
+    const ranked = media
+      .filter((item) => item.equipment === equipment && item.category === category)
+      .map((item) => {
+        const candidate = normalizeWords(item.nameRu + ' ' + item.name);
+        const candidateSet = new Set(candidate);
+        let score = 0;
+
+        if (item.nameRu && item.nameRu.toLowerCase() === ex.name.toLowerCase()) score += 100;
+        for (const word of wanted) if (candidateSet.has(word)) score += 8;
+
+        if (/жим/.test(wantedText) && /press|жим/.test(item.nameRu.toLowerCase() + ' ' + item.name.toLowerCase())) score += 8;
+        if (/тяга|подтяг/.test(wantedText) && /row|pull|тяга|подтяг/.test(item.nameRu.toLowerCase() + ' ' + item.name.toLowerCase())) score += 8;
+        if (/присед|выпад|зашаг/.test(wantedText) && /squat|lunge|step|присед|выпад/.test(item.nameRu.toLowerCase() + ' ' + item.name.toLowerCase())) score += 8;
+        if (/сгиб|бицепс/.test(wantedText) && /curl|сгиб|бицепс/.test(item.nameRu.toLowerCase() + ' ' + item.name.toLowerCase())) score += 8;
+        if (/разгиб|трицепс/.test(wantedText) && /extension|pushdown|разгиб|трицепс/.test(item.nameRu.toLowerCase() + ' ' + item.name.toLowerCase())) score += 8;
+
+        return { ...item, score };
+      })
+      .sort((a, b) => b.score - a.score)[0];
+
+    return ranked && ranked.score >= 8
+      ? { gifUrl: ranked.gifUrl, imageUrl: ranked.imageUrl }
+      : { gifUrl: '', imageUrl: '' };
+  };
+
+  for (const ex of ANATOMY_EXERCISES) {
+    const matchedMedia = mediaForExercise(ex);
   await pool.query(
     `INSERT INTO exercise_catalog_meta(key,value) VALUES('anatomy_version',$1)
      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
