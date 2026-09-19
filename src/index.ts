@@ -374,7 +374,16 @@ type ProfileForProgram = {
   workouts_per_week: number;
   workout_duration: number;
   limitations?: string;
+  training_focus?: string;
 };
+
+function deriveTrainingFocus(profile: Pick<ProfileForProgram, 'goal' | 'experience' | 'workout_duration'>) {
+  if (profile.goal === 'mass') return 'hypertrophy';
+  if (profile.goal === 'loss') return 'endurance';
+  if (profile.workout_duration <= 30) return 'conditioning';
+  if (profile.experience === 'beginner') return 'maintenance';
+  return 'maintenance';
+}
 
 type ScoredLibraryExercise = LibraryExercise & { score: number };
 
@@ -1678,7 +1687,7 @@ async function main() {
   await pool.query('SELECT 1');
   await ensureDatabase();
   await seedExerciseLibrary();
-  await syncExerciseCatalog();
+  await syncExerciseCatalog(pool);
   const integrity = await pool.query(`SELECT
     (SELECT COUNT(*) FROM trainer_profiles) AS profiles,
     (SELECT COUNT(*) FROM training_programs) AS programs,
