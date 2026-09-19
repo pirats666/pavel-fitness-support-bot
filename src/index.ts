@@ -22,6 +22,9 @@ if (configuredAdminId !== null && !Number.isSafeInteger(configuredAdminId)) {
 }
 
 const bot = new Bot(BOT_TOKEN);
+const TELEGRAM_POLL_LOCK_KEY = 9152026;
+let telegramPollLock: pg.PoolClient | null = null;
+
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
@@ -2295,10 +2298,41 @@ async function main() {
   `);
   console.log('Database integrity:', integrity.rows[0]);
   server.listen(PORT, () => console.log(`Health server listening on :${PORT}`));
+  // Render can briefly run the old and new process during a zero-downtime deploy.
+  // Telegram allows only one getUpdates consumer, so serialize polling across instances
+  // with a PostgreSQL session advisory lock. The lock is released automatically if the
+  // process/connection disappears, allowing the replacement instance to take over.
+  telegramPollLock = await pool.connect();
+  while (true) {
+    const { rows } = await telegramPollLock.query<{ locked: boolean }>(
+      'SELECT pg_try_advisory_lock($1) AS locked',
+      [TELEGRAM_POLL_LOCK_KEY]
+    );
+    if (rows[0]?.locked) break;
+    console.log('Another bot instance owns the Telegram polling lock; waiting...');
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
   await bot.api.deleteWebhook({ drop_pending_updates: false });
   console.log('Starting Telegram long polling...');
   await bot.start({ onStart: (info) => console.log(`Bot @${info.username} started`) });
 }
+
+async function shutdown(signal: string) {
+  console.log(`Received ${signal}; shutting down Telegram polling cleanly...`);
+  try { await bot.stop(); } catch (error) { console.error('Bot stop error', error); }
+  try { server.close(); } catch (error) { console.error('Health server close error', error); }
+  if (telegramPollLock) {
+    try { await telegramPollLock.query('SELECT pg_advisory_unlock($1)', [TELEGRAM_POLL_LOCK_KEY]); } catch (error) { console.error('Poll lock release error', error); }
+    telegramPollLock.release();
+    telegramPollLock = null;
+  }
+  await pool.end();
+  process.exit(0);
+}
+
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
+process.once('SIGINT', () => void shutdown('SIGINT'));
 
 main().catch((error) => {
   console.error('Fatal startup error', error);
