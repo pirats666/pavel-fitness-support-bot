@@ -1,5 +1,3 @@
-import OpenAI from 'openai';
-
 export type AIPlannerProfile = {
   goal: string;
   experience: string;
@@ -52,7 +50,6 @@ export type AIWorkoutPlan = {
 const apiKey = process.env.OPENAI_API_KEY;
 const model = process.env.OPENAI_MODEL ?? 'gpt-5.6-luna';
 
-const client = apiKey ? new OpenAI({ apiKey }) : null;
 
 const PLAN_SCHEMA = {
   type: 'object',
@@ -234,37 +231,53 @@ export async function createAIWorkoutPlan(
   exercises: AIExerciseCandidate[],
   correction = ''
 ): Promise<AIWorkoutPlan | null> {
-  if (!client) {
+  if (!apiKey) {
     console.warn('OPENAI_API_KEY is not configured; using deterministic planner.');
     return null;
   }
 
-  const response = await client.responses.create({
-    model,
-    store: false,
-    input: [
-      {
-        role: 'developer',
-        content: [
-          {
-            type: 'input_text',
-            text: buildInstructions(profile, exercises, correction)
-          }
-        ]
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + apiKey
+    },
+    body: JSON.stringify({
+      model,
+      store: false,
+      input: [
+        {
+          role: 'developer',
+          content: [
+            {
+              type: 'input_text',
+              text: buildInstructions(profile, exercises, correction)
+            }
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'fitness_workout_plan',
+          description: 'Structured individual fitness training plan',
+          strict: true,
+          schema: PLAN_SCHEMA
+        }
       }
-    ],
-    text: {
-      format: {
-        type: 'json_schema',
-        name: 'fitness_workout_plan',
-        description: 'Structured individual fitness training plan',
-        strict: true,
-        schema: PLAN_SCHEMA
-      }
-    }
+    }),
+    signal: AbortSignal.timeout(60000)
   });
 
-  const raw = response.output_text;
+  const payload = await response.json() as any;
+  if (!response.ok) {
+    throw new Error('OpenAI API ' + response.status + ': ' + JSON.stringify(payload).slice(0, 1000));
+  }
+
+  const raw = typeof payload.output_text === 'string'
+    ? payload.output_text
+    : payload.output?.flatMap((item: any) => item.content ?? [])
+        ?.find((item: any) => item.type === 'output_text')?.text;
   if (!raw) throw new Error('AI returned an empty workout plan');
 
   const plan = JSON.parse(raw) as AIWorkoutPlan;
@@ -273,5 +286,5 @@ export async function createAIWorkoutPlan(
 }
 
 export function aiEnabled() {
-  return Boolean(client);
+  return Boolean(apiKey);
 }
