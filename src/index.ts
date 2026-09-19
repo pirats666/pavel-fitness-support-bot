@@ -608,10 +608,15 @@ function displayExerciseName(row: LibraryExercise) {
   const name = String(row.nameRu || ruExerciseName(row.name)).trim();
   const equipment = String(row.equipmentRu || '').trim();
   const n = normalizeText(name);
-  if (/тяга каната к лицу/.test(n) && equipment) return `Тяга каната к лицу — ${equipment.replace('; ', ' / ')}`;
+  if (!equipment || !n) return name;
+
+  // Никогда не показываем пользователю обезличенное "в тренажёре/на блоке".
+  // Для силовых машин выводим конкретный тип оборудования; DDX использует Technogym и Matrix.
+  const machineLike = /тренажер|смит|пек-дек|блок|кроссовер|тяга верхнего|тяга нижнего|тяга с упором|жим от груди|жим плеч|разгибание ног|сгибание ног|жим ногами|отведение бедра|трицепс-пресс/.test(n);
+  if (machineLike) return equipment ? `${name} — ${equipment}` : name;
+  if (/тяга каната к лицу/.test(n) && equipment) return `Тяга каната к лицу — ${equipment}`;
   if (/тяга к подбородку/.test(n) && equipment) return `Тяга к подбородку — ${equipment}`;
-  if (/махи гантелями в стороны/.test(n)) return 'Махи гантелями в стороны';
-  if (/махи в стороны/.test(n) && equipment) return `Махи в стороны — ${equipment}`;
+  if (/махи в стороны/.test(n) && equipment && !/гантел/.test(n)) return `Махи в стороны — ${equipment}`;
   if (/тяга гантели/.test(n)) return 'Тяга гантели к поясу';
   if (/разведения назад/.test(n) && equipment) return `Разведения назад — ${equipment}`;
   if (/разведение рук/.test(n) && equipment) return `Разведение рук — ${equipment}`;
@@ -792,53 +797,78 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
       days.push(makeDay(d + 1, `День ${d + 1} — Full Body${frequency === 2 ? (d === 0 ? ' A' : ' B') : ''}`, 'Full Body', rows.slice(0, duration <= 45 ? 6 : 7)));
     }
   } else if (frequency === 3) {
-    // 3-day split: exactly 6 main exercises per day.
-    // Select distinct movement families so the day does not contain near-duplicates.
-    const takeDistinct = (
+    // Профессиональная схема 3 раза/неделю:
+    // День 1 — грудь + руки, День 2 — спина + плечи, День 3 — ноги + кор.
+    // Ровно 6 основных упражнений. Сначала базовые движения, затем изоляция.
+    // Внутри дня запрещаем повтор одного двигательного паттерна и близкие дубли.
+
+    const takeTrainer = (
       count: number,
       filter: (row: LibraryExercise) => boolean,
-      forbiddenPatterns: RegExp[] = []
+      patternOrder: RegExp[] = []
     ) => {
-      const result: LibraryExercise[] = [];
-      const localPatterns: string[] = [];
       const pool = candidates
         .filter((row) => !used.has(row.id) && !usedNames.has(normalize(row.nameRu || row.name)))
         .filter(filter)
-        .sort((a,b) => priority(b)-priority(a));
+        .sort((a, b) => {
+          const ap = priority(a), bp = priority(b);
+          const ai = patternOrder.findIndex((rx) => rx.test(normalize(a.movementPattern + ' ' + a.nameRu)));
+          const bi = patternOrder.findIndex((rx) => rx.test(normalize(b.movementPattern + ' ' + b.nameRu)));
+          const ao = ai < 0 ? 999 : ai, bo = bi < 0 ? 999 : bi;
+          return (ao - bo) || (bp - ap);
+        });
+
+      const result: LibraryExercise[] = [];
+      const localFamilies = new Set<string>();
       for (const row of pool) {
-        const pattern = normalize(row.movementPattern);
-        if (forbiddenPatterns.some((rx) => rx.test(pattern))) continue;
-        if (localPatterns.some((p) => p === pattern)) continue;
-        result.push(row); localPatterns.push(pattern);
-        used.add(row.id); usedNames.add(normalize(row.nameRu || row.name));
+        const family = normalize(row.movementPattern || row.name);
+        if (localFamilies.has(family) || usedFamilies.has(family)) continue;
+        result.push(row);
+        localFamilies.add(family);
+        used.add(row.id);
+        usedNames.add(normalize(row.nameRu || row.name));
+        usedFamilies.add(family);
         if (result.length >= count) break;
       }
       return result;
     };
 
     resetDaySelection();
-    days.push(makeDay(1, 'День 1 — Грудь + руки', 'Грудь + руки', [
-      ...takeDiverse(3, byGroup('Грудь')),
-      ...takeDiverse(2, byTarget('Руки', /бицепс|biceps/)),
-      ...takeDiverse(1, byTarget('Руки', /трицепс|triceps/))
-    ].slice(0, 6)));
+    const day1 = [
+      ...takeTrainer(2, byGroup('Грудь'), [/горизонтал.*жим/, /наклон.*жим/]),
+      ...takeTrainer(1, byGroup('Грудь'), [/горизонтал.*приведен/, /развед/, /пек-дек/]),
+      ...takeTrainer(1, byTarget('Руки', /бицепс|biceps/), [/сгибан.*локт/, /curl/]),
+      ...takeTrainer(2, byTarget('Руки', /трицепс|triceps/), [/разгибан.*локт/, /жим.*узк/])
+    ];
+    days.push(makeDay(1, 'День 1 — Грудь + руки', 'Грудь + руки', day1.slice(0, 6)));
 
     resetDaySelection();
-    days.push(makeDay(2, 'День 2 — Спина + плечи', 'Спина + плечи', [
-      ...takeDiverse(3, byGroup('Спина')),
-      ...takeDiverse(3, byGroup('Плечи'))
-    ].slice(0, 6)));
+    const day2 = [
+      ...takeTrainer(2, byGroup('Спина'), [/вертикал.*тяг/, /горизонтал.*тяг/]),
+      ...takeTrainer(1, byGroup('Спина'), [/разгибан|подъем.*лопат/]),
+      ...takeTrainer(1, byGroup('Плечи'), [/вертикал.*жим/]),
+      ...takeTrainer(1, byGroup('Плечи'), [/отведен/]),
+      ...takeTrainer(1, byGroup('Плечи'), [/горизонтал.*отведен|ротац/])
+    ];
+    days.push(makeDay(2, 'День 2 — Спина + плечи', 'Спина + плечи', day2.slice(0, 6)));
 
     resetDaySelection();
-    days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', [
-      ...takeDiverse(1, byTarget('Ноги', /квадрицепс|quadriceps|quad/)),
-      ...takeDiverse(1, byTarget('Ноги', /ягодич|glute/)),
-      ...takeDiverse(1, byTarget('Ноги', /задняя поверхность бедра|hamstring/)),
-      ...takeDiverse(1, byTarget('Ноги', /квадрицепс|quadriceps|quad/)),
-      ...takeDiverse(1, byGroup('Голень')),
-      ...takeDiverse(1, byGroup('Кор'))
-    ].slice(0, 6)));
-  } else if (frequency === 4) {
+    const day3 = [
+      ...takeTrainer(1, byTarget('Ноги', /квадрицепс|quadriceps|quad/), [/присед|разгибан.*колен|жим ног/]),
+      ...takeTrainer(1, byTarget('Ноги', /ягодич|glute/), [/разгибан.*бедр|hip thrust|ягод/]),
+      ...takeTrainer(1, byTarget('Ноги', /задн.*поверх|hamstring/), [/сгибан.*колен/]),
+      ...takeTrainer(1, byTarget('Ноги', /приводящ|adductor/), [/приведен/]),
+      ...takeTrainer(1, byGroup('Голень'), [/подошвен|икронож/]),
+      ...takeTrainer(1, byGroup('Кор'), [/анти|сгибан.*корпус|сгибан.*таз/])
+    ];
+    days.push(makeDay(3, 'День 3 — Ноги + кор', 'Ноги + кор', day3.slice(0, 6)));
+
+    // Жёсткая проверка структуры: генератор не имеет права тихо выдать 4–5 упражнений.
+    for (const day of days) {
+      if (day.exercises.length !== 6) {
+        throw new Error(`Некорректная структура ${day.title}: ожидалось 6 упражнений, получено ${day.exercises.length}`);
+      }
+    }  } else if (frequency === 4) {
     resetDaySelection();
     days.push(makeDay(1, 'День 1 — Грудь', 'Грудь', takeDiverse(6, byGroup('Грудь')).slice(0, 6)));
     resetDaySelection();
