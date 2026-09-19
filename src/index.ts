@@ -1455,7 +1455,7 @@ async function showExerciseBaseList(ctx: any, group: string, environment: string
 async function showExerciseBaseCard(ctx: any, exerciseId: string) {
   const { rows } = await pool.query(
     `SELECT name_ru, muscle_group_ru, equipment_ru, level, movement_pattern, target, secondary_muscles, instructions_ru, gif_url
-     FROM exercise_library WHERE id=$1 AND id LIKE 'base-%'`,
+     FROM exercise_library WHERE id=$1`,
     [exerciseId]
   );
   if (!rows[0]) return ctx.reply('Упражнение не найдено в нашей базе.');
