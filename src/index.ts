@@ -52,7 +52,6 @@ type Exercise = {
   comment?: string;
   progression?: string;
   recommendation?: string;
-  gifUrl?: string;
 };
 
 type LibraryExercise = {
@@ -69,7 +68,6 @@ type LibraryExercise = {
   secondaryMuscles: string[];
   instructionsRu: string;
   sourceUrl: string;
-  gifUrl?: string;
   imageUrl?: string;
   trainingTypes: string[];
   movementPattern: string;
@@ -628,7 +626,6 @@ function exercisePrescription(row: LibraryExercise, profile: ProfileForProgram, 
     muscleGroup: row.muscleGroupRu || row.bodyPartRu,
     movementPattern: row.movementPattern,
     name: row.nameRu || ruExerciseName(row.name),
-    gifUrl: row.gifUrl,
     sets,
     reps,
     rest: index < 4 ? (isMass ? '90–120 сек' : '60–90 сек') : '45–60 сек',
@@ -752,24 +749,51 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
       days.push(makeDay(d + 1, `День ${d + 1} — Full Body${frequency === 2 ? (d === 0 ? ' A' : ' B') : ''}`, 'Full Body', rows.slice(0, duration <= 45 ? 6 : 7)));
     }
   } else if (frequency === 3) {
+    // 3-day split: exactly 6 main exercises per day.
+    // Select distinct movement families so the day does not contain near-duplicates.
+    const takeDistinct = (
+      count: number,
+      filter: (row: LibraryExercise) => boolean,
+      forbiddenPatterns: RegExp[] = []
+    ) => {
+      const result: LibraryExercise[] = [];
+      const localPatterns: string[] = [];
+      const pool = candidates
+        .filter((row) => !used.has(row.id) && !usedNames.has(normalize(row.nameRu || row.name)))
+        .filter(filter)
+        .sort((a,b) => priority(b)-priority(a));
+      for (const row of pool) {
+        const pattern = normalize(row.movementPattern);
+        if (forbiddenPatterns.some((rx) => rx.test(pattern))) continue;
+        if (localPatterns.some((p) => p === pattern)) continue;
+        result.push(row); localPatterns.push(pattern);
+        used.add(row.id); usedNames.add(normalize(row.nameRu || row.name));
+        if (result.length >= count) break;
+      }
+      return result;
+    };
+
     resetDaySelection();
     days.push(makeDay(1, 'День 1 — Грудь + руки', 'Грудь + руки', [
-      ...take(2, byGroup('Грудь'), priority),
-      ...take(1, byTarget('Руки', /бицепс|biceps/), priority),
-      ...take(1, byTarget('Руки', /трицепс|triceps/), priority)
-    ]));
+      ...takeDistinct(3, byGroup('Грудь')),
+      ...takeDistinct(2, byTarget('Руки', /бицепс|biceps/)),
+      ...takeDistinct(1, byTarget('Руки', /трицепс|triceps/))
+    ].slice(0, 6)));
+
     resetDaySelection();
     days.push(makeDay(2, 'День 2 — Спина + плечи', 'Спина + плечи', [
-      ...take(3, byGroup('Спина'), priority),
-      ...take(3, byGroup('Плечи'), priority)
+      ...takeDistinct(3, byGroup('Спина'), [/разгибател/]),
+      ...takeDistinct(3, byGroup('Плечи'))
     ].slice(0, 6)));
+
     resetDaySelection();
     days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', [
-      ...take(2, byTarget('Ноги', /квадрицепс|quadriceps|quad/), priority),
-      ...take(1, byTarget('Ноги', /ягодич|glute/), priority),
-      ...take(1, byTarget('Ноги', /задняя поверхность бедра|hamstring/), priority),
-      ...take(1, byGroup('Голень'), priority),
-      ...take(1, byGroup('Кор'), priority)
+      ...takeDistinct(1, byTarget('Ноги', /квадрицепс|quadriceps|quad/)),
+      ...takeDistinct(1, byTarget('Ноги', /ягодич|glute/)),
+      ...takeDistinct(1, byTarget('Ноги', /задняя поверхность бедра|hamstring/), [/станов|deadlift|румын/]),
+      ...takeDistinct(1, byTarget('Ноги', /квадрицепс|quadriceps|quad/), [/присед/]),
+      ...takeDistinct(1, byGroup('Голень')),
+      ...takeDistinct(1, byGroup('Кор'))
     ].slice(0, 6)));
   } else if (frequency === 4) {
     resetDaySelection();
@@ -1125,20 +1149,6 @@ async function sendProgramMedia(ctx: any, program: Program, replyMarkup?: Inline
 
       await sendProgramText(ctx, exerciseText);
 
-      const url = resolveGifUrl(exercise.gifUrl);
-      if (url) {
-        try {
-          await ctx.replyWithAnimation(url, {
-            caption: `<b>${i + 1}. ${escapeHtml(exercise.name)}</b>`,
-            parse_mode: 'HTML'
-          });
-        } catch (error) {
-          console.error('exercise gif send failed', { name: exercise.name, url, error });
-        }
-      } else {
-        console.warn('exercise has no GIF', { name: exercise.name });
-      }
-    }
 
     await sendProgramText(ctx, [
       '',
@@ -1147,11 +1157,7 @@ async function sendProgramMedia(ctx: any, program: Program, replyMarkup?: Inline
     ].join('\n'));
   }
 
-  await sendProgramText(ctx, [
-    '━━━━━━━━━━━━━━━━━━',
-    '📝 <b>ПРИМЕЧАНИЯ</b>',
-    ...program.notes.map((note) => '• ' + escapeHtml(note))
-  ].join('\n'), replyMarkup);
+  await sendProgramText(ctx, '━━━━━━━━━━━━━━━━━━', replyMarkup);
 }
 function programText(program: Program) {
   const parts = [
