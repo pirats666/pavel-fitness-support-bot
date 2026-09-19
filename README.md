@@ -1,65 +1,27 @@
-# Pavel Fitness Support Bot
+# Pavel Fitness Support Bot — Stage 1
 
 Internal trainer-only Telegram bot for @pavel_fitness_support_bot.
 
-## Architecture
+Stage 1 includes only:
+- trainer-only access;
+- /start and main menu;
+- Clients;
+- real PostgreSQL persistence;
+- client creation, confirmation, editing, deletion;
+- client list and client card;
+- Notes placeholder.
 
-- Telegram bot only — no client interface.
-- Access is restricted by `ADMIN_TELEGRAM_ID`.
-- PostgreSQL is the only persistent storage.
-- Render runs the Node.js service.
-- Long polling is used; no Telegram webhook is required.
-- `/health` is provided for Render health checks.
+Environment:
+- BOT_TOKEN
+- ADMIN_TELEGRAM_ID
+- DATABASE_URL
+- PORT (Render default: 10000)
 
-## Questionnaire
-
-1. Goal
-2. Training experience
-3. Training location
-4. Workouts per week
-5. Workout duration
-6. Limitations / special considerations
-
-The completed profile is upserted into `trainer_profiles`.
-
-## Environment
-
-Provide:
-
-- `BOT_TOKEN`
-- `ADMIN_TELEGRAM_ID`
-- `DATABASE_URL`
-- `PORT` (Render provides this automatically; local default is 10000)
-
-Never commit real tokens or database credentials.
-
-## Database
-
-Run `schema.sql` once against the PostgreSQL database.
-
-## Local development
-
+Run:
 ```bash
 npm ci
 npm run build
 npm start
 ```
 
-## Production
-
-Render uses `render.yaml`:
-
-- build: `npm ci && npm run build`
-- start: `npm start`
-- health check: `/health`
-
-## Commands
-
-- `/start` — main menu
-- `/profile` — show saved profile
-- `/reset` — restart questionnaire
-- `/help` — command list
-
-## Separation rule
-
-This repository is independent from `pavel-fit-official-bot` and the legacy `fitlife` archive. Do not share tokens, environment files, database credentials, webhook settings, or production code between the two bots.
+The bot uses the existing Supabase PostgreSQL database. No mock client data is created.
