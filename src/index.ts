@@ -94,7 +94,7 @@ type Program = {
 };
 
 const sessions = new Map<number, QuizState>();
-const correctionSessions = new Map<number, { programId: number }>();
+const correctionSessions = new Map<number, { programId: number; muscleGroup?: string; exerciseIndex?: number; day?: number }>();
 const paymentSessions = new Map<number, { step: 'amount' | 'total' | 'remaining'; amount?: number; total?: number; targetId?: number }>();
 const clientSearchSessions = new Map<number, { query?: string }>();
 const selectedClient = new Map<number, number>();
@@ -1156,6 +1156,69 @@ function programText(program: Program) {
   return parts.join('\n');
 }
 
+function exerciseMuscleGroup(name: string, focus = '') {
+  const text = normalizeText(name);
+  if (/(груд|жим.*леж|жим.*наклон|отжим|кроссовер|сведен)/.test(text)) return 'Грудь';
+  if (/(широч|спин|тяга|подтяг|пуловер|ромб|трапец)/.test(text)) return 'Спина';
+  if (/(плеч|дельт|разведен.*сторон|жим.*голов|задн.*дельт)/.test(text)) return 'Плечи';
+  if (/(бицеп|сгибан.*рук|молот)/.test(text)) return 'Бицепс';
+  if (/(трицеп|разгибан.*рук|француз)/.test(text)) return 'Трицепс';
+  if (/(квадриц|присед|выпад|жим ног|разгибан.*ног|зашаг|step)/.test(text)) return 'Квадрицепс';
+  if (/(ягод|hip thrust|мост|отведен.*бедр)/.test(text)) return 'Ягодицы';
+  if (/(бицепс бедр|задн.*поверх.*бедр|румын|сгибан.*ног)/.test(text)) return 'Задняя поверхность бедра';
+  if (/(икр|голен|носк)/.test(text)) return 'Икры';
+  if (/(пресс|живот|скручив|планк|dead bug|кор)/.test(text)) return 'Кор';
+  if (focus && /ног/.test(normalizeText(focus))) return 'Ноги';
+  if (focus && /груд/.test(normalizeText(focus))) return 'Грудь';
+  if (focus && /спин/.test(normalizeText(focus))) return 'Спина';
+  return 'Другое';
+}
+
+function correctionGroups(program: Program) {
+  const groups = new Map<string, Array<{day: number; index: number; name: string}>>();
+  for (const day of program.days) {
+    day.exercises.forEach((exercise, index) => {
+      const group = exerciseMuscleGroup(exercise.name, day.focus);
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group)!.push({ day: day.day, index, name: exercise.name });
+    });
+  }
+  return groups;
+}
+
+async function showCorrectionGroups(ctx: any, programId: number) {
+  const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
+  if (!rows[0]) return ctx.reply('Программа не найдена.');
+  const program = rows[0].program as Program;
+  const groups = correctionGroups(program);
+  const kb = new InlineKeyboard();
+  for (const [group, exercises] of groups) {
+    kb.text(`💪 ${group} (${exercises.length})`, `program:correct:group:${programId}:${encodeURIComponent(group)}`).row();
+  }
+  kb.text('⬅️ Назад к программе', `program:correct:back:${programId}`);
+  await ctx.reply('🔧 <b>Что корректируем?</b>\n\nВыбери группу мышц:', {
+    parse_mode: 'HTML',
+    reply_markup: kb
+  });
+}
+
+async function showCorrectionExercises(ctx: any, programId: number, group: string) {
+  const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
+  if (!rows[0]) return ctx.reply('Программа не найдена.');
+  const program = rows[0].program as Program;
+  const exercises = correctionGroups(program).get(group) ?? [];
+  if (!exercises.length) return ctx.reply('В этой группе упражнений нет.');
+  const kb = new InlineKeyboard();
+  exercises.forEach((exercise) => {
+    kb.text(`🏋️ ${exercise.name.slice(0, 35)}`, `program:correct:exercise:${programId}:${exercise.day}:${exercise.index}`).row();
+  });
+  kb.text('⬅️ Группы мышц', `program:correct:groups:${programId}`);
+  await ctx.reply(`💪 <b>${escapeHtml(group)}</b>\n\nВыбери упражнение:`, {
+    parse_mode: 'HTML',
+    reply_markup: kb
+  });
+}
+
 function programKeyboard(programId: number, status = 'draft') {
   const kb = new InlineKeyboard()
     .text('🔄 Скорректировать программу', `program:correct:${programId}`)
@@ -1890,7 +1953,21 @@ ${text}
   if (correction) {
     const request = ctx.message.text.trim();
     correctionSessions.delete(ctx.from.id);
-    const created = await createProgram(selectedClient.get(ctx.from.id) ?? ctx.from.id, request);
+
+    let scopedRequest = request;
+    if (correction.day && correction.exerciseIndex !== undefined) {
+      const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [correction.programId]);
+      const program = rows[0]?.program as Program | undefined;
+      const exercise = program?.days.find((d) => d.day === correction.day)?.exercises[correction.exerciseIndex];
+      if (exercise) {
+        scopedRequest = `Точечная коррекция. День ${correction.day}. Группа мышц: ${exerciseMuscleGroup(exercise.name)}. Упражнение: «${exercise.name}». Требование тренера: ${request}`;
+      }
+    } else if (correction.muscleGroup) {
+      scopedRequest = `Корректировать только группу мышц «${correction.muscleGroup}». Требование тренера: ${request}`;
+    }
+
+    const targetId = selectedClient.get(ctx.from.id) ?? ctx.from.id;
+    const created = await createProgram(targetId, scopedRequest);
     if (!created) return ctx.reply('Сначала заполните профиль.');
     await ctx.reply(`Готово. Создана версия ${created.version} с учётом коррекции:\n«${escapeHtml(request)}»`, { parse_mode: 'HTML' });
     return sendProgramMedia(ctx, created.program, programKeyboard(created.id));
@@ -1931,7 +2008,43 @@ bot.callbackQuery(/^program:correct:(\d+)$/, async (ctx) => {
   const programId = Number(ctx.match[1]);
   correctionSessions.set(ctx.from.id, { programId });
   await ctx.answerCallbackQuery();
-  await ctx.reply('🔄 Что изменить в программе? Напиши одним сообщением. Например: «сделать легче», «сделать интенсивнее», «заменить упражнения на домашние», «уменьшить объём».');
+  await showCorrectionGroups(ctx, programId);
+});
+
+bot.callbackQuery(/^program:correct:groups:(\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const programId = Number(ctx.match[1]);
+  correctionSessions.set(ctx.from.id, { programId });
+  await ctx.answerCallbackQuery();
+  await showCorrectionGroups(ctx, programId);
+});
+
+bot.callbackQuery(/^program:correct:group:(\d+):(.+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const programId = Number(ctx.match[1]);
+  const group = decodeURIComponent(ctx.match[2]);
+  correctionSessions.set(ctx.from.id, { programId, muscleGroup: group });
+  await ctx.answerCallbackQuery();
+  await showCorrectionExercises(ctx, programId, group);
+});
+
+bot.callbackQuery(/^program:correct:exercise:(\d+):(\d+):(\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const programId = Number(ctx.match[1]);
+  const day = Number(ctx.match[2]);
+  const exerciseIndex = Number(ctx.match[3]);
+  correctionSessions.set(ctx.from.id, { programId, day, exerciseIndex });
+  await ctx.answerCallbackQuery();
+  await ctx.reply('✏️ <b>Коррекция упражнения</b>\n\nНапиши, что нужно сделать с этим упражнением. Например:\n• заменить на другое\n• сделать проще\n• сделать тяжелее\n• изменить подходы/повторения\n• убрать упражнение', { parse_mode: 'HTML' });
+});
+
+bot.callbackQuery(/^program:correct:back:(\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  await ctx.answerCallbackQuery();
+  const programId = Number(ctx.match[1]);
+  const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
+  if (!rows[0]) return ctx.reply('Программа не найдена.');
+  await sendProgramMedia(ctx, rows[0].program as Program, programKeyboard(programId));
 });
 
 bot.callbackQuery(/^program:approve:(\d+)$/, async (ctx) => {
