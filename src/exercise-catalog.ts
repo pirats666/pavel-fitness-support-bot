@@ -177,7 +177,7 @@ function trainingContexts(name: string, category: string, equipment: string, tar
 
 export async function syncAnatomyExerciseCatalog(pool: Pool) {
   const mediaRows = await pool.query(
-    `SELECT name, COALESCE(name_ru, '') AS name_ru, equipment, category, gif_url, image_url
+    `SELECT name, COALESCE(name_ru, '') AS name_ru, equipment, category, target, muscle_group, gif_url, image_url
      FROM exercise_library
      WHERE id NOT LIKE 'anat-%' AND gif_url <> ''`
   );
@@ -188,6 +188,8 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
     equipment: String(row.equipment ?? ''),
     category: String(row.category ?? ''),
     gifUrl: String(row.gif_url ?? ''),
+    target: String(row.target ?? ''),
+    muscleGroup: String(row.muscle_group ?? ''),
     imageUrl: String(row.image_url ?? '')
   }));
 
@@ -207,15 +209,37 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
     const ranked = media
       .filter((item) => {
         const equipmentMatches = ex.environment === 'gym'
-          ? ['gym', 'cable'].includes(item.equipment)
+          ? item.equipment !== 'body weight'
           : item.equipment === 'body weight';
         return equipmentMatches && item.category === category;
       })
       .map((item) => {
         const candidate = normalizeWords(item.nameRu + ' ' + item.name);
         const candidateSet = new Set(candidate);
-        const itemText = (item.nameRu + ' ' + item.name).toLowerCase();
+        const itemText = (item.nameRu + ' ' + item.name + ' ' + item.target + ' ' + item.muscleGroup).toLowerCase();
         let score = 0;
+
+        const exText = (ex.name + ' ' + ex.muscle + ' ' + ex.primaryAction).toLowerCase();
+        const semanticRules: Array<[RegExp, RegExp]> = [
+          [/step[- ]?up|зашаг/, /step[- ]?up|зашаг/],
+          [/good morning/, /good morning/],
+          [/tibialis|передняя большеберцовая/, /tibialis|toe raise|dorsiflex|передн/],
+          [/push[- ]?up plus|протракц|передняя зубчатая/, /push[- ]?up plus|scapula|serratus|протракц/],
+          [/pallof|anti-extension/, /pallof|anti[- ]extension|anti extension/],
+          [/copenhagen|приводящ/, /copenhagen|adductor|приводящ/],
+          [/scapul|лопат/, /scapul|лопат|shoulder blade/],
+          [/rotation|ротац/, /rotation|rotational|ротац/],
+          [/carry|переноск|фермер/, /carry|farmer|переноск|фермер/],
+          [/dip|брусь/, /dip|triceps dip|брусь/],
+          [/hanging|вис/, /hanging|hang|вис/],
+          [/row|тяга/, /row|pull|тяга/],
+          [/lunge|выпад/, /lunge|выпад/],
+          [/squat|присед/, /squat|присед/],
+          [/calf|икронож|камбаловид/, /calf|soleus|икронож|камбал/],
+          [/shoulder|дельт|плеч/, /shoulder|deltoid|raise|плеч|дельт/],
+          [/biceps|бицепс/, /biceps|curl|бицепс/],
+          [/triceps|трицепс/, /triceps|extension|pushdown|трицепс/]
+        ];
 
         if (item.nameRu && item.nameRu.toLowerCase() === ex.name.toLowerCase()) score += 100;
         for (const word of wanted) if (candidateSet.has(word)) score += 8;
@@ -229,6 +253,16 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
         if (/пресс|кор|скруч|подъ[её]м/.test(wantedText) && /abs|crunch|sit|raise|кор|пресс|скруч/.test(itemText)) score += 8;
         if (/плеч|дельт|face pull|мах/.test(wantedText) && /shoulder|deltoid|face pull|raise|плеч|дельт|мах/.test(itemText)) score += 8;
         if (/ягод|glute/.test(wantedText) && /glute|hip|ягод/.test(itemText)) score += 8;
+        for (const [wantedRule, candidateRule] of semanticRules) {
+          if (wantedRule.test(exText) && candidateRule.test(itemText)) score += 12;
+        }
+
+        if (ex.environment === 'gym') {
+          if (/блок|cable/.test(exText) && item.equipment === 'cable') score += 10;
+          if (/гантел|dumbbell/.test(exText) && item.equipment === 'dumbbell') score += 10;
+          if (/штанг|barbell/.test(exText) && item.equipment === 'barbell') score += 10;
+          if (/тренаж|machine/.test(exText) && /machine|leverage|smith|cable/.test(item.equipment)) score += 6;
+        }
 
         return { ...item, score };
       })
