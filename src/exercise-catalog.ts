@@ -209,16 +209,21 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
       .map((item) => {
         const candidate = normalizeWords(item.nameRu + ' ' + item.name);
         const candidateSet = new Set(candidate);
+        const itemText = (item.nameRu + ' ' + item.name).toLowerCase();
         let score = 0;
 
         if (item.nameRu && item.nameRu.toLowerCase() === ex.name.toLowerCase()) score += 100;
         for (const word of wanted) if (candidateSet.has(word)) score += 8;
 
-        if (/жим/.test(wantedText) && /press|жим/.test(item.nameRu.toLowerCase() + ' ' + item.name.toLowerCase())) score += 8;
-        if (/тяга|подтяг/.test(wantedText) && /row|pull|тяга|подтяг/.test(item.nameRu.toLowerCase() + ' ' + item.name.toLowerCase())) score += 8;
-        if (/присед|выпад|зашаг/.test(wantedText) && /squat|lunge|step|присед|выпад/.test(item.nameRu.toLowerCase() + ' ' + item.name.toLowerCase())) score += 8;
-        if (/сгиб|бицепс/.test(wantedText) && /curl|сгиб|бицепс/.test(item.nameRu.toLowerCase() + ' ' + item.name.toLowerCase())) score += 8;
-        if (/разгиб|трицепс/.test(wantedText) && /extension|pushdown|разгиб|трицепс/.test(item.nameRu.toLowerCase() + ' ' + item.name.toLowerCase())) score += 8;
+        if (/жим/.test(wantedText) && /press|жим/.test(itemText)) score += 8;
+        if (/тяга|подтяг/.test(wantedText) && /row|pull|тяга|подтяг/.test(itemText)) score += 8;
+        if (/присед|выпад|зашаг/.test(wantedText) && /squat|lunge|step|присед|выпад/.test(itemText)) score += 8;
+        if (/сгиб|бицепс/.test(wantedText) && /curl|сгиб|бицепс/.test(itemText)) score += 8;
+        if (/разгиб|трицепс/.test(wantedText) && /extension|pushdown|разгиб|трицепс/.test(itemText)) score += 8;
+        if (/икр|голен/.test(wantedText) && /calf|голен|икр/.test(itemText)) score += 8;
+        if (/пресс|кор|скруч|подъ[её]м/.test(wantedText) && /abs|crunch|sit|raise|кор|пресс|скруч/.test(itemText)) score += 8;
+        if (/плеч|дельт|face pull|мах/.test(wantedText) && /shoulder|deltoid|face pull|raise|плеч|дельт|мах/.test(itemText)) score += 8;
+        if (/ягод|glute/.test(wantedText) && /glute|hip|ягод/.test(itemText)) score += 8;
 
         return { ...item, score };
       })
@@ -231,6 +236,46 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
 
   for (const ex of ANATOMY_EXERCISES) {
     const matchedMedia = mediaForExercise(ex);
+
+    await pool.query(
+      `INSERT INTO exercise_library
+        (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url,
+         gif_url,image_url,name_ru,body_part_ru,equipment_ru,muscle_group_ru,training_types,movement_pattern,level,
+         catalog_version,training_contexts)
+       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,$15,$16,$2,$9,$10,$11,'["maintenance","strength","hypertrophy"]'::jsonb,$12,'beginner',$13,$14::jsonb)
+       ON CONFLICT (id) DO UPDATE SET
+         name=EXCLUDED.name,
+         category=EXCLUDED.category,
+         equipment=EXCLUDED.equipment,
+         target=EXCLUDED.target,
+         muscle_group=EXCLUDED.muscle_group,
+         instructions_ru=EXCLUDED.instructions_ru,
+         name_ru=EXCLUDED.name_ru,
+         body_part_ru=EXCLUDED.body_part_ru,
+         equipment_ru=EXCLUDED.equipment_ru,
+         muscle_group_ru=EXCLUDED.muscle_group_ru,
+         movement_pattern=EXCLUDED.movement_pattern,
+         catalog_version=EXCLUDED.catalog_version,
+         training_contexts=EXCLUDED.training_contexts,
+         gif_url=EXCLUDED.gif_url,
+         image_url=EXCLUDED.image_url`,
+      [
+        ex.id, ex.name, ex.category,
+        ex.environment === 'gym' ? (ex.equipmentRu === 'Блок' ? 'cable' : 'gym') : 'body weight',
+        ex.muscle, ex.muscle,
+        ex.notes,
+        'anatomo-training-database',
+        ex.muscleGroup, ex.equipmentRu, ex.muscle,
+        ex.primaryAction, ANATOMY_CATALOG_VERSION,
+        matchedMedia.gifUrl, matchedMedia.imageUrl,
+        JSON.stringify([
+          ex.environment === 'home' ? 'home' : ex.environment === 'outdoor' ? 'outdoor' : 'gym',
+          ...(ex.environment === 'outdoor' ? ['functional'] : [])
+        ])
+      ]
+    );
+  }
+
   await pool.query(
     `INSERT INTO exercise_catalog_meta(key,value) VALUES('anatomy_version',$1)
      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
@@ -238,7 +283,6 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
   );
   console.log('Anatomy exercise catalog synchronized:', ANATOMY_EXERCISES.length);
 }
-
 export async function syncExerciseCatalog(pool: Pool) {
   const metaTable = 'exercise_catalog_meta';
   await pool.query('CREATE TABLE IF NOT EXISTS exercise_catalog_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
