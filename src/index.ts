@@ -688,10 +688,12 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
 
   const used = new Set<string>();
   const usedNames = new Set<string>();
+  const usedFamilies = new Set<string>();
 
   const resetDaySelection = () => {
     used.clear();
     usedNames.clear();
+    usedFamilies.clear();
   };
 
   const take = (
@@ -714,11 +716,7 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     return result;
   };
 
-  const exerciseFamily = (row: LibraryExercise) => normalize(
-    (row.nameRu || row.name)
-      .replace(/гантел[ьи]|штанг[аи]|тренажер|тренажёре|смита|нижний блок|средний блок|верхний блок|блок|канат|скамья|машина/gi, '')
-      .replace(/\s+/g, ' ')
-  );
+  const exerciseFamily = (row: LibraryExercise) => normalize(row.movementPattern || row.name);
   const takeDiverse = (count: number, filter: (row: LibraryExercise) => boolean) => {
     const pool = candidates
       .filter((row) => !used.has(row.id) && !usedNames.has(normalize(row.nameRu || row.name)))
@@ -728,8 +726,8 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     const families = new Set<string>();
     for (const row of pool) {
       const family = exerciseFamily(row);
-      if (families.has(family)) continue;
-      families.add(family);
+      if (families.has(family) || usedFamilies.has(family)) continue;
+      families.add(family); usedFamilies.add(family);
       result.push(row);
       used.add(row.id);
       usedNames.add(normalize(row.nameRu || row.name));
@@ -850,11 +848,11 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     days.push(makeDay(2, 'День 2 — Спина', 'Спина', takeDiverse(6, byGroup('Спина')).slice(0, 6)));
     resetDaySelection();
     days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', [
-      ...take(2, byTarget('Ноги', /квадрицепс|quadriceps|quad/), priority),
-      ...take(1, byTarget('Ноги', /ягодич|glute/), priority),
-      ...take(1, byTarget('Ноги', /задняя поверхность бедра|hamstring/), priority),
-      ...take(1, byGroup('Голень'), priority),
-      ...take(1, byGroup('Кор'), priority)
+      ...takeDiverse(1, byTarget('Ноги', /квадрицепс|quadriceps|quad/)),
+      ...takeDiverse(1, byTarget('Ноги', /ягодич|glute/)),
+      ...takeDiverse(1, byTarget('Ноги', /задняя поверхность бедра|hamstring/)),
+      ...takeDiverse(1, byGroup('Голень')),
+      ...takeDiverse(1, byGroup('Кор'))
     ].slice(0, 6)));
     resetDaySelection();
     days.push(makeDay(4, 'День 4 — Руки + плечи', 'Руки + плечи', [
@@ -864,9 +862,9 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     ].slice(0, 6)));
   } else {
     resetDaySelection();
-    days.push(makeDay(1, 'День 1 — Грудь', 'Грудь', take(6, byGroup('Грудь'), priority).slice(0, 6)));
+    days.push(makeDay(1, 'День 1 — Грудь', 'Грудь', takeDiverse(6, byGroup('Грудь')).slice(0, 6)));
     resetDaySelection();
-    days.push(makeDay(2, 'День 2 — Спина', 'Спина', take(6, byGroup('Спина'), priority).slice(0, 6)));
+    days.push(makeDay(2, 'День 2 — Спина', 'Спина', takeDiverse(6, byGroup('Спина')).slice(0, 6)));
     resetDaySelection();
     days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', [
       ...take(2, byTarget('Ноги', /квадрицепс|quadriceps|quad/), priority),
