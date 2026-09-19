@@ -669,9 +669,9 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
   const used = new Set<string>();
   const usedNames = new Set<string>();
 
-  const take = (count: number, filter: (row: LibraryExercise) => boolean, preferred?: (row: LibraryExercise) => number) => {
+  const take = (count: number, filter: (row: LibraryExercise) => boolean, preferred?: (row: LibraryExercise) => number, allowUsed = false) => {
     const pool = candidates
-      .filter((row) => !used.has(row.id) && !usedNames.has(normalizeText(row.nameRu || row.name)))
+      .filter((row) => allowUsed || (!used.has(row.id) && !usedNames.has(normalizeText(row.nameRu || row.name))))
       .filter(filter)
       .sort((a,b) => (preferred ? preferred(b) - preferred(a) : 0));
     const result: LibraryExercise[] = [];
@@ -738,7 +738,7 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     const shoulders = take(normalizedProfile.location === 'outdoor' ? 1 : 3, (r) => r.category === 'shoulders', priority);
     let day2Rows = [...back, ...shoulders];
     if (day2Rows.length < 4) {
-      day2Rows.push(...take(4 - day2Rows.length, (r) => ['back','shoulders'].includes(r.category), priority));
+      day2Rows.push(...take(4 - day2Rows.length, (r) => ['back','shoulders'].includes(r.category), priority, normalizedProfile.location === 'outdoor'));
     }
     days.push(makeDay(2, 'День 2 — Спина + плечи', 'Спина + плечи', day2Rows.slice(0, mainCount)));
 
@@ -768,8 +768,8 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
         const got = take(1, (r) => pattern.test(normalizeText(r.movementPattern + ' ' + r.nameRu)), priority);
         if (got[0]) functionalRows.push(got[0]);
       }
-      if (functionalRows.length < 4) {
-        functionalRows.push(...take(4 - functionalRows.length, (r) => ['waist','upper legs','back','chest','shoulders'].includes(r.category), priority));
+      if (functionalRows.length < 5) {
+        functionalRows.push(...take(5 - functionalRows.length, (r) => ['waist','upper legs','back','chest','shoulders'].includes(r.category), priority, normalizedProfile.location === 'outdoor'));
       }
       days.push(makeDay(4, 'День 4 — Функционал + растяжка', 'Функционал + растяжка', functionalRows.slice(0, Math.max(5, Math.min(6, mainCount)))));
     }
