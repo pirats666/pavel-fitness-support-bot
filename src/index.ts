@@ -1287,7 +1287,11 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
 
   const categories = correctionCategorySet(group);
   const candidates = library
-    .filter((row) => categories.has(row.category))
+    .filter((row) =>
+      row.muscleGroupRu === group ||
+      (group === 'Плечи' && row.muscleGroupRu === 'Плечевой пояс') ||
+      (row.muscleGroupRu === '' && categories.has(row.category))
+    )
     .filter((row) => isExerciseAllowed(row, String(profile?.limitations ?? '')));
 
   const unique: LibraryExercise[] = [];
@@ -1317,7 +1321,7 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
   });
 
   const kb = new InlineKeyboard();
-  unique.slice(0, 50).forEach((row, index) => {
+  unique.forEach((row, index) => {
     const name = row.nameRu || ruExerciseName(row.name);
     kb.text(`🏋️ ${name.slice(0, 32)}`, `program:correct:pick:${programId}:${dayNumber}:${index}`).row();
   });
@@ -1327,6 +1331,86 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
     `💪 <b>${escapeHtml(group)}</b>\n\nУпражнения из нашей анатомо-тренировочной базы для текущего места тренировок.\nВыбери упражнение — оно заменит текущее упражнение этой группы в выбранном дне.`,
     {parse_mode:'HTML',reply_markup:kb}
   );
+}
+
+const EXERCISE_BASE_GROUPS = ['Грудь','Спина','Плечи','Плечевой пояс','Руки','Ноги','Голень','Кор'] as const;
+const EXERCISE_BASE_GROUP_SLUG: Record<string,string> = {
+  'Грудь':'ch','Спина':'back','Плечи':'sh','Плечевой пояс':'shoulder-girdle','Руки':'arms','Ноги':'legs','Голень':'calf','Кор':'core'
+};
+const EXERCISE_BASE_ENV_SLUG: Record<string,string> = { home:'home', gym:'gym', outdoor:'outdoor' };
+
+async function showExerciseBaseGroups(ctx: any) {
+  if (!(await isAdmin(ctx))) return ctx.reply('Доступ закрыт.');
+  const kb = new InlineKeyboard();
+  for (const group of EXERCISE_BASE_GROUPS) {
+    kb.text(`💪 ${group}`, `base:group:${EXERCISE_BASE_GROUP_SLUG[group]}`).row();
+  }
+  await ctx.reply(
+    '📚 <b>Полная база упражнений</b>\\n\\n120 упражнений из нашей анатомо-тренировочной базы. Выбери мышечную группу:',
+    {parse_mode:'HTML',reply_markup:kb}
+  );
+}
+
+function exerciseBaseGroupFromSlug(slug: string) {
+  return Object.entries(EXERCISE_BASE_GROUP_SLUG).find(([,value]) => value === slug)?.[0] ?? '';
+}
+
+function exerciseBaseEnvFromSlug(slug: string) {
+  return ({home:'home',gym:'gym',outdoor:'outdoor'} as Record<string,string>)[slug] ?? '';
+}
+
+async function showExerciseBaseEnvironments(ctx: any, group: string) {
+  const kb = new InlineKeyboard()
+    .text('🏠 Дом', `base:env:${EXERCISE_BASE_GROUP_SLUG[group]}:home`).row()
+    .text('🏋️ Зал', `base:env:${EXERCISE_BASE_GROUP_SLUG[group]}:gym`).row()
+    .text('🌳 Спортплощадка', `base:env:${EXERCISE_BASE_GROUP_SLUG[group]}:outdoor`).row()
+    .text('⬅️ Группы', 'base:groups');
+  await ctx.reply(`💪 <b>${escapeHtml(group)}</b>\\n\\nВыбери место тренировок:`, {parse_mode:'HTML',reply_markup:kb});
+}
+
+async function showExerciseBaseList(ctx: any, group: string, environment: string) {
+  const { rows } = await pool.query(
+    `SELECT id, name_ru, equipment_ru, level
+     FROM exercise_library
+     WHERE id LIKE 'base-' || $1 || '-%'
+       AND muscle_group_ru = $2
+     ORDER BY id`,
+    [environment, group]
+  );
+  const kb = new InlineKeyboard();
+  for (const row of rows) {
+    const level = String(row.level) === 'intermediate' ? 'Средний' : 'Начальный';
+    const equipment = String(row.equipment_ru ?? '');
+    kb.text(`🏋️ ${String(row.name_ru ?? '').slice(0, 38)}`, `base:view:${row.id}`).row();
+    // Equipment and level are shown in the message below; buttons stay compact.
+  }
+  kb.text('⬅️ Место', `base:group:${EXERCISE_BASE_GROUP_SLUG[group]}`);
+  await ctx.reply(
+    `📚 <b>${escapeHtml(group)}</b> — ${environment === 'home' ? 'Дом' : environment === 'gym' ? 'Зал' : 'Спортплощадка'}\\n\\nУпражнений: ${rows.length}\\nВыбери упражнение для просмотра карточки:`,
+    {parse_mode:'HTML',reply_markup:kb}
+  );
+}
+
+async function showExerciseBaseCard(ctx: any, exerciseId: string) {
+  const { rows } = await pool.query(
+    `SELECT name_ru, muscle_group_ru, equipment_ru, level, movement_pattern, target, secondary_muscles, instructions_ru, gif_url
+     FROM exercise_library WHERE id=$1 AND id LIKE 'base-%'`,
+    [exerciseId]
+  );
+  if (!rows[0]) return ctx.reply('Упражнение не найдено в нашей базе.');
+  const r = rows[0];
+  const level = String(r.level) === 'intermediate' ? 'Средний' : 'Начальный';
+  const secondary = Array.isArray(r.secondary_muscles) ? r.secondary_muscles.join(', ') : String(r.secondary_muscles ?? '');
+  const text = `🏋️ <b>${escapeHtml(String(r.name_ru ?? ''))}</b>
+
+💪 Группа: ${escapeHtml(String(r.muscle_group_ru ?? ''))}
+🎯 Целевая мышца: ${escapeHtml(String(r.target ?? ''))}
+🔄 Движение: ${escapeHtml(String(r.movement_pattern ?? ''))}
+🧰 Оборудование: ${escapeHtml(String(r.equipment_ru ?? ''))}
+📈 Уровень: ${level}
+🤝 Синергисты: ${escapeHtml(secondary)}
+${r.gif_url ? '\\n🎞 GIF подключён' : '\\n🎞 GIF пока не привязан'}`;
+  await ctx.reply(text, {parse_mode:'HTML',reply_markup:new InlineKeyboard().text('⬅️ Назад к базе', 'base:groups')});
 }
 
 function programKeyboard(programId: number, status = 'draft') {
@@ -1385,6 +1469,8 @@ async function sendAdminPanel(ctx: any) {
       .text('👥 Клиенты', 'admin:profiles')
       .row()
       .text('➕ Добавить клиента', 'admin:client:add')
+      .row()
+      .text('📚 База упражнений', 'base:groups')
   });
 }
 
@@ -2149,6 +2235,35 @@ function correctionGroupSlug(group: string) {
 function correctionGroupFromSlug(slug: string) {
   return ({ch:'Грудь',back:'Спина',sh:'Плечи',arms:'Руки',legs:'Ноги',core:'Кор'} as Record<string,string>)[slug] ?? '';
 }
+
+bot.callbackQuery('base:groups', async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  await ctx.answerCallbackQuery();
+  await showExerciseBaseGroups(ctx);
+});
+
+bot.callbackQuery(/^base:group:([^:]+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const group = exerciseBaseGroupFromSlug(ctx.match[1]);
+  if (!group) return ctx.answerCallbackQuery({ text: 'Группа не найдена.' });
+  await ctx.answerCallbackQuery();
+  await showExerciseBaseEnvironments(ctx, group);
+});
+
+bot.callbackQuery(/^base:env:([^:]+):(home|gym|outdoor)$/, async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const group = exerciseBaseGroupFromSlug(ctx.match[1]);
+  const environment = exerciseBaseEnvFromSlug(ctx.match[2]);
+  if (!group || !environment) return ctx.answerCallbackQuery({ text: 'Раздел не найден.' });
+  await ctx.answerCallbackQuery();
+  await showExerciseBaseList(ctx, group, environment);
+});
+
+bot.callbackQuery(/^base:view:(base-[^:]+-[^:]+(?:-[^:]+)*)$/, async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  await ctx.answerCallbackQuery();
+  await showExerciseBaseCard(ctx, ctx.match[1]);
+});
 
 bot.callbackQuery(/^program:correct:group:(\d+):(\d+):([^:]+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
