@@ -1006,37 +1006,38 @@ async function sendProgramMedia(ctx: any, program: Program, replyMarkup?: Inline
     `🏋️ <b>${escapeHtml(program.title)}</b>`,
     `🎯 Цель: <b>${escapeHtml(program.goal)}</b>`,
     `📍 Формат: <b>${escapeHtml(program.location)}</b>`,
-    `📅 График: <b>${program.frequency} тренировки/неделю</b>`,
+    `📅 График: <b>${program.frequency} тренировок/неделю</b>`,
     `⏱ Длительность: <b>${program.duration} мин</b>`,
     '',
-    `📈 <b>Прогрессия программы</b>`,
+    `📈 <b>Прогрессия</b>`,
     escapeHtml(program.progression)
   ].join('\\n');
   await sendProgramText(ctx, header);
 
   for (const day of program.days) {
     await sendProgramText(ctx, [
+      '',
       '━━━━━━━━━━━━━━',
       `🏋️ <b>${escapeHtml(day.title)}</b>`,
-      `🎯 <b>Фокус:</b> ${escapeHtml(day.focus)}`,
+      `🎯 <b>${escapeHtml(day.focus)}</b>`,
       '',
       '🔥 <b>Разминка</b>',
       escapeHtml(day.warmup),
       '',
-      '💪 <b>Основная часть</b>',
-      '',
-      ...day.exercises.flatMap((exercise, i) => [
-        `<b>${i + 1}. ${escapeHtml(exercise.name)}</b>`,
-        `   📊 ${exercise.sets} × ${escapeHtml(exercise.reps)}   ⏱ ${escapeHtml(exercise.rest)}`,
-        exercise.recommendation ? `   💡 ${escapeHtml(exercise.recommendation)}` : (exercise.comment ? `   💡 ${escapeHtml(exercise.comment)}` : ''),
-        ''
-      ].filter(Boolean)),
-      '🧘 <b>Заминка</b>',
-      escapeHtml(day.cooldown)
+      '💪 <b>Основная часть</b>'
     ].join('\\n'));
 
     for (let i = 0; i < day.exercises.length; i++) {
       const exercise = day.exercises[i];
+      const exerciseText = [
+        `<b>${i + 1}. ${escapeHtml(exercise.name)}</b>`,
+        `Подходы: <b>${exercise.sets}</b> · Повторения: <b>${escapeHtml(exercise.reps)}</b>`,
+        `Отдых: <b>${escapeHtml(exercise.rest)}</b>`,
+        exercise.recommendation ? `💡 ${escapeHtml(exercise.recommendation)}` : ''
+      ].filter(Boolean).join('\\n');
+
+      await sendProgramText(ctx, exerciseText);
+
       const url = resolveGifUrl(exercise.gifUrl);
       if (url) {
         try {
@@ -1046,6 +1047,11 @@ async function sendProgramMedia(ctx: any, program: Program, replyMarkup?: Inline
         }
       }
     }
+
+    await sendProgramText(ctx, [
+      '🧘 <b>Заминка</b>',
+      escapeHtml(day.cooldown)
+    ].join('\\n'));
   }
 
   const notes = [
@@ -1055,7 +1061,6 @@ async function sendProgramMedia(ctx: any, program: Program, replyMarkup?: Inline
   ].join('\\n');
   await sendProgramText(ctx, notes, replyMarkup);
 }
-
 function programText(program: Program) {
   const parts = [
     `🏋️ <b>${escapeHtml(program.title)}</b>`,
@@ -1952,6 +1957,7 @@ async function main() {
   await ensureDatabase();
   await seedExerciseLibrary();
   await syncExerciseCatalog(pool);
+  await syncAnatomyExerciseCatalog(pool);
   console.log('Using anatomy catalog version:', ANATOMY_CATALOG_VERSION);
   const integrity = await pool.query(`SELECT
     (SELECT COUNT(*) FROM trainer_profiles) AS profiles,
