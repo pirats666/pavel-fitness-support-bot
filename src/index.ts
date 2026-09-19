@@ -441,6 +441,9 @@ function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desired
   if (focus === 'power' && row.trainingTypes.includes('power')) score += 15;
   if (focus === 'conditioning' && row.trainingTypes.includes('conditioning')) score += 15;
 
+  // Prioritise foundational movements so the catalog is not dominated by exotic variations.
+  if (/(squat|присед|lunge|выпад|bench press|жим|row|тяга|pull.?up|подтяг|push.?up|отжим|deadlift|станов|romanian|румын|calf raise|подъ[её]м.*нос|overhead press|жим.*плеч)/.test(text)) score += 12;
+
   if (profile.goal === 'mass' && /(chest|pector|back|lat|dorsi|quadr|hamstring|glute|deltoid|shoulder)/.test(text)) score += 8;
   if (profile.goal === 'loss' && /(squat|lunge|row|push|press|pull|deadlift|carry|cardio)/.test(text)) score += 7;
   if (profile.goal === 'health' && /(squat|lunge|row|push|press|pull|hinge|core|balance|mobility)/.test(text)) score += 7;
@@ -509,11 +512,10 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
     ? profile.training_focus
     : deriveTrainingFocus(profile);
 
-  const categoryPlan = profile.workouts_per_week <= 1
-    ? ['upper legs','chest','back','shoulders','waist']
-    : profile.workouts_per_week === 2
-      ? ['upper legs','back','chest','shoulders','waist']
-      : ['upper legs','back','chest','shoulders','waist','lower legs'];
+  // Build a genuinely diverse planning pool: every major body region must be represented.
+  // The previous selector could fill the pool with a few dominant categories, which made
+  // gym and outdoor programs converge on the same small set of movements.
+  const categoryPlan = ['upper legs','chest','back','shoulders','upper arms','lower arms','waist','lower legs'];
 
   const selected: LibraryExercise[] = [];
   const used = new Set<string>();
@@ -523,26 +525,32 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
       .filter((row) => row.category === category)
       .map((row) => ({ ...row, score: scoreExercise(row, profile, category, used) }))
       .sort((a, b) => b.score - a.score);
-    const best = ranked.find((row) => !used.has(row.id));
-    if (best) {
-      selected.push(best);
-      used.add(best.id);
+
+    // Give the AI several alternatives per muscle region, not just one exercise.
+    for (const row of ranked) {
+      if (selected.length >= 32) break;
+      if (used.has(row.id)) continue;
+      selected.push(row);
+      used.add(row.id);
+      if (selected.filter((x) => x.category === category).length >= 4) break;
     }
   }
 
+  // Fill remaining slots with the best unique exercises, but penalise duplicates of
+  // the same movement so the AI sees a broad exercise vocabulary.
   const focusRanked = allowed
     .filter((row) => !used.has(row.id))
     .map((row) => ({ ...row, score: scoreExercise(row, profile, row.category, used) }))
     .sort((a, b) => b.score - a.score);
 
   for (const row of focusRanked) {
-    if (selected.length >= 24) break;
+    if (selected.length >= 32) break;
     selected.push(row);
     used.add(row.id);
   }
 
-  console.log('Program exercise pool:', { focus, selected: selected.length });
-  return selected.slice(0, 24);
+  console.log('Program exercise pool:', { focus, selected: selected.length, location: profile.location });
+  return selected.slice(0, 32);
 }
 
 function exerciseProgression(profile: ProfileForProgram, reps: string) {
