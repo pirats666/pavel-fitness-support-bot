@@ -10,6 +10,36 @@ export const pool = new Pool({
   ssl: DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
 });
 
+export async function migrateStage1Schema(): Promise<void> {
+  await pool.query(`ALTER TABLE public.clients ALTER COLUMN telegram_username DROP NOT NULL`);
+  await pool.query(`ALTER TABLE public.clients RENAME COLUMN telegram_id TO telegram_user_id`);
+  await pool.query(`ALTER TABLE public.clients RENAME COLUMN first_name TO telegram_first_name`);
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS name TEXT`);
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS telegram_last_name TEXT`);
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS age INTEGER`);
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS height_cm NUMERIC`);
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS weight_kg NUMERIC`);
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS goal TEXT`);
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS experience TEXT`);
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS workouts_per_week INTEGER`);
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS training_location TEXT`);
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS limitations TEXT NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT ''`);
+  await pool.query(`UPDATE public.clients SET name = COALESCE(name, CASE WHEN telegram_username IS NULL THEN 'Клиент' ELSE '@' || telegram_username END)`);
+  await pool.query(`ALTER TABLE public.clients ALTER COLUMN name SET NOT NULL`);
+  await pool.query(`ALTER TABLE public.clients ALTER COLUMN age SET NOT NULL`);
+  await pool.query(`ALTER TABLE public.clients ALTER COLUMN height_cm SET NOT NULL`);
+  await pool.query(`ALTER TABLE public.clients ALTER COLUMN weight_kg SET NOT NULL`);
+  await pool.query(`ALTER TABLE public.clients ALTER COLUMN goal SET NOT NULL`);
+  await pool.query(`ALTER TABLE public.clients ALTER COLUMN experience SET NOT NULL`);
+  await pool.query(`ALTER TABLE public.clients ALTER COLUMN workouts_per_week SET NOT NULL`);
+  await pool.query(`ALTER TABLE public.clients ALTER COLUMN training_location SET NOT NULL`);
+  await pool.query(`ALTER TABLE public.clients ADD CONSTRAINT clients_age_check CHECK (age >= 1 AND age <= 120)`);
+  await pool.query(`ALTER TABLE public.clients ADD CONSTRAINT clients_height_cm_check CHECK (height_cm > 0 AND height_cm <= 300)`);
+  await pool.query(`ALTER TABLE public.clients ADD CONSTRAINT clients_weight_kg_check CHECK (weight_kg > 0 AND weight_kg <= 500)`);
+  await pool.query(`ALTER TABLE public.clients ADD CONSTRAINT clients_workouts_per_week_check CHECK (workouts_per_week >= 2 AND workouts_per_week <= 5)`);
+}
+
 export async function listClients(): Promise<Client[]> {
   const { rows } = await pool.query<Client>('SELECT * FROM public.clients ORDER BY created_at DESC, id DESC');
   return rows;
