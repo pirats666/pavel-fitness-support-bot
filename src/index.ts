@@ -43,6 +43,8 @@ type Exercise = {
   reps: string;
   rest: string;
   comment?: string;
+  progression?: string;
+  recommendation?: string;
   gifUrl?: string;
 };
 
@@ -474,7 +476,7 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
      FROM exercise_library
      WHERE ${equipmentFilter}
        AND category IN ('upper legs','chest','back','shoulders','waist','lower legs','upper arms','lower arms','cardio')
-     LIMIT 800`
+     LIMIT 1324`
   );
 
   const candidates: LibraryExercise[] = rows.map((row: any) => ({
@@ -539,6 +541,28 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
   return selected.slice(0, 24);
 }
 
+function exerciseProgression(profile: ProfileForProgram, reps: string) {
+  const upper = reps.match(/(\\d+)\\s*[–-]\\s*(\\d+)/);
+  if (upper) {
+    return `Когда верхняя граница диапазона выполняется во всех подходах с чистой техникой, постепенно увеличивать нагрузку и снова работать с нижней границы диапазона.`;
+  }
+  if (/мин|сек/.test(reps)) {
+    return 'Постепенно увеличивать продолжительность или сокращать паузы небольшими шагами при сохранении техники.';
+  }
+  return 'Увеличивать объём или нагрузку постепенно, сохраняя контролируемую технику.';
+}
+
+function exerciseRecommendation(profile: ProfileForProgram, row: LibraryExercise) {
+  const difficulty = exerciseDifficulty(row);
+  if (difficulty >= 3 && profile.experience === 'beginner') {
+    return 'Для новичка использовать упрощённый вариант или минимальную нагрузку; приоритет — техника.';
+  }
+  if (profile.limitations) {
+    return 'Выполнять без боли; при появлении дискомфорта прекратить упражнение и подобрать альтернативу.';
+  }
+  return 'Контролировать амплитуду и технику; оставлять небольшой запас повторений и не доводить каждый подход до отказа.';
+}
+
 function exercisePrescription(row: LibraryExercise, profile: ProfileForProgram, index: number): Exercise {
   const beginner = profile.experience === 'beginner' || profile.experience === 'under1';
   const isMass = profile.goal === 'mass';
@@ -560,6 +584,8 @@ function exercisePrescription(row: LibraryExercise, profile: ProfileForProgram, 
     sets,
     reps,
     rest: index < 4 ? (isMass ? '90–120 сек' : '60–90 сек') : '45–60 сек',
+    progression: exerciseProgression(profile, reps),
+    recommendation: exerciseRecommendation(profile, row),
     comment: isMass
       ? 'Контролируемая техника, 1–3 повторения в запасе. При достижении верхней границы повторений постепенно увеличивать нагрузку.'
       : 'Выбирать вариант упражнения, который можно выполнять с устойчивой техникой без боли.'
@@ -770,6 +796,8 @@ function convertAIPlanToProgram(aiPlan: Awaited<ReturnType<typeof createAIWorkou
         sets: item.sets,
         reps: item.reps,
         rest: item.rest,
+        progression: aiPlan.progression,
+        recommendation: item.comment,
         comment: item.comment
       };
     }),
@@ -818,6 +846,11 @@ async function createProgram(userId: number, correction = '') {
         training_focus: String(profile.training_focus ?? 'auto')
       }, version);
 
+      const allExerciseNameRows = await pool.query(
+        'SELECT COALESCE(NULLIF(name_ru, \'\'), name) AS name FROM exercise_library ORDER BY id'
+      );
+      const allExerciseNames = allExerciseNameRows.rows.map((row: any) => String(row.name)).filter(Boolean);
+
       const aiProfile: AIPlannerProfile = {
         goal: String(profile.goal),
         experience: String(profile.experience),
@@ -840,7 +873,7 @@ async function createProgram(userId: number, correction = '') {
         instructionsRu: e.instructionsRu
       }));
 
-      const aiPlan = await createAIWorkoutPlan(aiProfile, candidates, correction);
+      const aiPlan = await createAIWorkoutPlan(aiProfile, candidates, correction, allExerciseNames);
       program = convertAIPlanToProgram(aiPlan, profile, version, aiCandidates, correction) ?? await buildProgram(profile, version, correction);
       console.log('AI program created', { userId, version, format: aiPlan?.format ?? 'fallback' });
     } catch (error) {
@@ -1001,7 +1034,9 @@ function programText(program: Program) {
         `<b>${i + 1}. ${escapeHtml(e.name)}</b>`,
         `   Подходы: <b>${e.sets}</b>   Повторения: <b>${escapeHtml(e.reps)}</b>`,
         `   Отдых: <b>${escapeHtml(e.rest)}</b>`,
-        e.comment ? `   💡 ${escapeHtml(e.comment)}` : '',
+        `   📊 Количество: <b>${e.sets} × ${escapeHtml(e.reps)}</b>`,
+        e.progression ? `   📈 Прогрессия: ${escapeHtml(e.progression)}` : '',
+        e.recommendation ? `   💡 Рекомендация: ${escapeHtml(e.recommendation)}` : (e.comment ? `   💡 ${escapeHtml(e.comment)}` : ''),
         ''
       );
     });
@@ -1081,9 +1116,6 @@ async function sendAdminPanel(ctx: any) {
       .text('👥 Клиенты', 'admin:profiles')
       .row()
       .text('➕ Добавить клиента', 'admin:client:add')
-      .row()
-      .text('👥 Клиенты', 'admin:profiles')
-      .text('📊 Статистика', 'admin:stats')
   });
 }
 
