@@ -2373,8 +2373,83 @@ bot.callbackQuery(/^program:correct:day:(\d+):(\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const programId=Number(ctx.match[1]), day=Number(ctx.match[2]);
   correctionSessions.set(ctx.from.id,{programId,day}); await ctx.answerCallbackQuery();
-  await showCorrectionGroups(ctx,programId,day);
+  await showCorrectionDayExercises(ctx,programId,day);
 });
+type PendingDayCorrection = { programId:number; day:number; selections:string[] };
+const pendingDayCorrections = new Map<number, PendingDayCorrection>();
+
+function groupsForFocus(focus:string): string[] {
+  const f=normalizeText(focus);
+  if(f.includes('грудь')&&f.includes('рук')) return ['Грудь','Руки'];
+  if(f.includes('спина')&&f.includes('плеч')) return ['Спина','Плечи'];
+  if(f.includes('ног')) return ['Ноги','Голень','Кор'];
+  if(f==='грудь') return ['Грудь'];
+  if(f==='спина') return ['Спина'];
+  if(f==='руки') return ['Руки'];
+  if(f==='плечи') return ['Плечи'];
+  return ['Грудь','Спина','Плечи','Руки','Ноги','Голень','Кор'];
+}
+
+async function showCorrectionDayExercises(ctx:any,programId:number,dayNumber:number){
+  const {rows}=await pool.query('SELECT program FROM training_programs WHERE id=$1',[programId]);
+  if(!rows[0]) return ctx.reply('Программа не найдена.');
+  const program=rows[0].program as Program;
+  const day=program.days.find((d)=>d.day===dayNumber);
+  if(!day) return ctx.reply('День не найден.');
+  const profileId=selectedClient.get(ctx.from?.id??0)??ctx.from?.id;
+  const profile=profileId?await getProfile(profileId):null;
+  const library=await getLibraryExercises({goal:String(profile?.goal??'health'),experience:String(profile?.experience??'beginner'),location:String(profile?.location??'gym'),workouts_per_week:Number(profile?.workouts_per_week??program.frequency),workout_duration:Number(profile?.workout_duration??program.duration),limitations:String(profile?.limitations??'')},Number(program.version??1),true);
+  const allowed=new Set(groupsForFocus(day.focus));
+  const unique:LibraryExercise[]=[]; const seen=new Set<string>();
+  for(const row of library){
+    const group=row.muscleGroupRu==='Плечевой пояс'?'Плечи':row.muscleGroupRu;
+    if(!allowed.has(group)||!isExerciseAllowed(row,String(profile?.limitations??''))) continue;
+    const key=normalizeText(row.nameRu||row.name)+'|'+normalizeText(row.equipmentRu);
+    if(seen.has(key)) continue; seen.add(key); unique.push(row);
+  }
+  const userId=ctx.from?.id??0;
+  let pending=pendingDayCorrections.get(userId);
+  if(!pending||pending.programId!==programId||pending.day!==dayNumber){pending={programId,day:dayNumber,selections:[]};pendingDayCorrections.set(userId,pending);}
+  correctionSessions.set(userId,{programId,day:dayNumber,catalogChoices:unique.map(x=>x.id)});
+  const kb=new InlineKeyboard();
+  unique.forEach((row,index)=>{const selected=pending!.selections.includes(row.id);kb.text((selected?'✅ ':'⬜ ')+(row.nameRu||row.name),`program:correct:toggle:${programId}:${dayNumber}:${index}`).row();});
+  kb.text(`💾 Сохранить выбранные (${pending.selections.length})`,`program:correct:save:${programId}`).row();
+  kb.text('🗑 Очистить выбор',`program:correct:clear:${programId}:${dayNumber}`).row();
+  kb.text('⬅️ К дням',`program:correct:days:${programId}`);
+  await ctx.reply(`🔧 <b>Замена всего дня ${dayNumber}</b>\\n\\nВыбери все упражнения, которые должны войти в этот день.\\nПосле выбора нажми «💾 Сохранить выбранные».`,{parse_mode:'HTML',reply_markup:kb});
+}
+
+bot.callbackQuery(/^program:correct:toggle:(\d+):(\d+):(\d+)$/,async(ctx)=>{
+  if(!(await isAdmin(ctx))||!ctx.from) return ctx.answerCallbackQuery({text:'Доступ закрыт.'});
+  const programId=Number(ctx.match[1]),day=Number(ctx.match[2]),index=Number(ctx.match[3]); const session=correctionSessions.get(ctx.from.id);
+  if(!session||session.programId!==programId||session.day!==day||!session.catalogChoices?.[index]) return ctx.answerCallbackQuery({text:'Список устарел. Открой день заново.'});
+  const id=session.catalogChoices[index]; const pending=pendingDayCorrections.get(ctx.from.id)??{programId,day,selections:[]}; const i=pending.selections.indexOf(id);
+  if(i>=0) pending.selections.splice(i,1); else pending.selections.push(id); pendingDayCorrections.set(ctx.from.id,pending);
+  await ctx.answerCallbackQuery({text:i>=0?'Убрано':'Добавлено'}); await showCorrectionDayExercises(ctx,programId,day);
+});
+
+bot.callbackQuery(/^program:correct:clear:(\d+):(\d+)$/,async(ctx)=>{
+  if(!(await isAdmin(ctx))||!ctx.from) return ctx.answerCallbackQuery({text:'Доступ закрыт.'});
+  const programId=Number(ctx.match[1]),day=Number(ctx.match[2]); pendingDayCorrections.set(ctx.from.id,{programId,day,selections:[]});
+  await ctx.answerCallbackQuery({text:'Выбор очищен'}); await showCorrectionDayExercises(ctx,programId,day);
+});
+
+bot.callbackQuery(/^program:correct:save:(\d+)$/,async(ctx)=>{
+  if(!(await isAdmin(ctx))||!ctx.from) return ctx.answerCallbackQuery({text:'Доступ закрыт.'});
+  const programId=Number(ctx.match[1]); const pending=pendingDayCorrections.get(ctx.from.id);
+  if(!pending||pending.programId!==programId||pending.selections.length===0) return ctx.answerCallbackQuery({text:'Выбери хотя бы одно упражнение.'});
+  const {rows}=await pool.query('SELECT telegram_user_id,version,program FROM training_programs WHERE id=$1',[programId]);
+  if(!rows[0]) return ctx.answerCallbackQuery({text:'Программа не найдена.'});
+  const program=rows[0].program as Program; const dayIndex=program.days.findIndex(d=>d.day===pending.day); if(dayIndex<0) return ctx.answerCallbackQuery({text:'День не найден.'});
+  const profile=await getProfile(Number(rows[0].telegram_user_id)); if(!profile) return ctx.answerCallbackQuery({text:'Профиль не найден.'});
+  const library=await getLibraryExercises({goal:String(profile.goal),experience:String(profile.experience),location:String(profile.location),workouts_per_week:Number(profile.workouts_per_week),workout_duration:Number(profile.workout_duration),limitations:String(profile.limitations??'')},Number(program.version),true);
+  const selectedRows=pending.selections.map(id=>library.find(x=>x.id===id)).filter(Boolean) as LibraryExercise[]; if(!selectedRows.length) return ctx.answerCallbackQuery({text:'Упражнения не найдены.'});
+  const next=JSON.parse(JSON.stringify(program)) as Program; next.days[dayIndex].exercises=selectedRows.map((row,i)=>exercisePrescription(row,profile,i)); next.version=Number(rows[0].version)+1;
+  const correction=`Полная замена дня ${pending.day}: ${selectedRows.map(x=>x.nameRu||x.name).join(', ')}`;
+  const saved=await pool.query(`INSERT INTO training_programs (telegram_user_id,version,status,program,correction_request) VALUES ($1,$2,'draft',$3::jsonb,$4) RETURNING id`,[Number(rows[0].telegram_user_id),next.version,JSON.stringify(next),correction]);
+  pendingDayCorrections.delete(ctx.from.id); correctionSessions.delete(ctx.from.id); await ctx.answerCallbackQuery({text:'День сохранён'}); await ctx.reply('✅ Весь день заменён. Сохранена новая версия программы.'); await sendProgramMedia(ctx,next,programKeyboard(Number(saved.rows[0].id)));
+});
+
 bot.callbackQuery(/^program:correct:back:(\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const programId = Number(ctx.match[1]);
