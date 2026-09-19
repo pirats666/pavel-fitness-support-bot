@@ -94,7 +94,7 @@ type Program = {
 };
 
 const sessions = new Map<number, QuizState>();
-const correctionSessions = new Map<number, { programId: number; muscleGroup?: string; exerciseIndex?: number; day?: number; catalogExerciseId?: string }>();
+const correctionSessions = new Map<number, { programId: number; muscleGroup?: string; exerciseIndex?: number; day?: number; catalogExerciseId?: string; catalogChoices?: string[] }>();
 const paymentSessions = new Map<number, { step: 'amount' | 'total' | 'remaining'; amount?: number; total?: number; targetId?: number }>();
 const clientSearchSessions = new Map<number, { query?: string }>();
 const selectedClient = new Map<number, number>();
@@ -468,7 +468,7 @@ function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desired
   return score;
 }
 
-async function getLibraryExercises(profile: ProfileForProgram, version: number): Promise<LibraryExercise[]> {
+async function getLibraryExercises(profile: ProfileForProgram, version: number, fullCatalog = false): Promise<LibraryExercise[]> {
   const equipmentFilter = profile.location === 'gym' || profile.location === 'mixed'
     ? `equipment <> ''`
     : profile.location === 'outdoor'
@@ -552,6 +552,7 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
   }
 
   console.log('Program exercise pool:', { focus, selected: selected.length, location: profile.location });
+  if (fullCatalog) return allowed;
   return selected.slice(0, 32);
 }
 
@@ -637,7 +638,7 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     ];
   } else if (frequency === 3) {
     daySpecs = [
-      {title:'День 1 — Грудь + руки',focus:'Грудь + руки',categories:['chest','upper arms']},
+      {title:'День 1 — Грудь + руки',focus:'Грудь + руки',categories:['chest','upper arms','lower arms']},
       {title:'День 2 — Спина + плечи',focus:'Спина + плечи',categories:['back','shoulders']},
       {title:'День 3 — Ноги',focus:'Ноги',categories:['upper legs','lower legs']}
     ];
@@ -928,8 +929,10 @@ async function createProgram(userId: number, correction = '') {
       }));
 
       const aiPlan = await createAIWorkoutPlan(aiProfile, candidates, correction, allExerciseNames);
-      program = convertAIPlanToProgram(aiPlan, profile, version, aiCandidates, correction) ?? await buildProgram(profile, version, correction);
-      console.log('AI program created', { userId, version, format: aiPlan?.format ?? 'fallback' });
+      // Keep the strict trainer split authoritative. The deterministic planner uses the
+      // same anatomy catalog and questionnaire, while preventing AI from mixing day focuses.
+      program = await buildProgram(profile, version, correction);
+      console.log('AI analysis completed; strict trainer split applied', { userId, version, aiFormat: aiPlan?.format ?? 'none' });
     } catch (error) {
       console.error('AI program failed; using deterministic planner', error);
       program = await buildProgram(profile, version, correction);
@@ -1244,7 +1247,7 @@ async function showCorrectionGroups(ctx: any, programId: number, dayNumber: numb
   const program = rows[0].program as Program;
   const groups = correctionGroupsForDay(program, dayNumber);
   const kb = new InlineKeyboard();
-  for (const group of groups) kb.text(`💪 ${group}`, `program:correct:group:${programId}:${dayNumber}:${encodeURIComponent(group)}`).row();
+  for (const group of groups) kb.text(`💪 ${group}`, `program:correct:group:${programId}:${dayNumber}:${correctionGroupSlug(group)}`).row();
   kb.text('⬅️ Дни', `program:correct:days:${programId}`);
   await ctx.reply(`🏋️ <b>День ${dayNumber}</b>\n\nВыбери группу мышц:`, {parse_mode:'HTML',reply_markup:kb});
 }
@@ -1252,29 +1255,47 @@ async function showCorrectionGroups(ctx: any, programId: number, dayNumber: numb
 async function showCorrectionExercises(ctx: any, programId: number, dayNumber: number, group: string) {
   const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
   if (!rows[0]) return ctx.reply('Программа не найдена.');
-  const program = rows[0].program as Program;
   const profileId = selectedClient.get(ctx.from?.id ?? 0) ?? ctx.from?.id;
   const profile = profileId ? await getProfile(profileId) : null;
   const library = await getLibraryExercises({
     goal:String(profile?.goal ?? 'health'), experience:String(profile?.experience ?? 'beginner'),
     location:String(profile?.location ?? 'gym'), workouts_per_week:Number(profile?.workouts_per_week ?? 4),
     workout_duration:Number(profile?.workout_duration ?? 60), limitations:String(profile?.limitations ?? '')
-  }, program.version);
+  }, Number(rows[0].program?.version ?? 1), true);
+
   const categories = correctionCategorySet(group);
-  const candidates = library.filter((row) => categories.has(row.category))
+  const candidates = library
+    .filter((row) => categories.has(row.category))
     .filter((row) => isExerciseAllowed(row, String(profile?.limitations ?? '')));
-  const kb = new InlineKeyboard();
+
+  const unique: LibraryExercise[] = [];
   const seen = new Set<string>();
   for (const row of candidates) {
     const name = row.nameRu || ruExerciseName(row.name);
     const key = normalizeText(name);
     if (seen.has(key)) continue;
     seen.add(key);
-    kb.text(`🏋️ ${name.slice(0, 32)}`, `program:correct:catalog:${programId}:${dayNumber}:${encodeURIComponent(group)}:${encodeURIComponent(row.id)}`).row();
-    if (seen.size >= 50) break;
+    unique.push(row);
   }
+
+  correctionSessions.set(ctx.from?.id ?? 0, {
+    programId,
+    day: dayNumber,
+    muscleGroup: group,
+    catalogChoices: unique.map((row) => row.id)
+  });
+
+  const kb = new InlineKeyboard();
+  unique.slice(0, 50).forEach((row, index) => {
+    const name = row.nameRu || ruExerciseName(row.name);
+    kb.text(`🏋️ ${name.slice(0, 32)}`, `program:correct:pick:${programId}:${dayNumber}:${index}`).row();
+  });
   kb.text('⬅️ Группы', `program:correct:day:${programId}:${dayNumber}`);
-  await ctx.reply(`💪 <b>${escapeHtml(group)}</b>\n\nВсе упражнения ${escapeHtml(group.toLowerCase())} из базы для текущего места тренировок.\nВыбери упражнение:`, {parse_mode:'HTML',reply_markup:kb});
+
+  await ctx.reply(
+    `💪 <b>${escapeHtml(group)}</b>\\n\\nВсе упражнения этой группы из анатомической базы для текущего места тренировок.\\nВыбери упражнение — оно сразу заменит первое упражнение этой группы в выбранном дне.`,
+    {parse_mode:'HTML',reply_markup:kb}
+  );
 }
 
 function programKeyboard(programId: number, status = 'draft') {
@@ -2080,28 +2101,92 @@ bot.callbackQuery(/^program:correct:day:(\d+):(\d+)$/, async (ctx) => {
   await showCorrectionGroups(ctx,programId,day);
 });
 
-bot.callbackQuery(/^program:correct:group:(\d+):(\d+):(.+)$/, async (ctx) => {
+function correctionGroupSlug(group: string) {
+  return ({'Грудь':'ch','Спина':'back','Плечи':'sh','Руки':'arms','Ноги':'legs','Кор':'core'} as Record<string,string>)[group] ?? 'other';
+}
+
+function correctionGroupFromSlug(slug: string) {
+  return ({ch:'Грудь',back:'Спина',sh:'Плечи',arms:'Руки',legs:'Ноги',core:'Кор'} as Record<string,string>)[slug] ?? '';
+}
+
+bot.callbackQuery(/^program:correct:group:(\\d+):(\\d+):([^:]+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const programId=Number(ctx.match[1]), day=Number(ctx.match[2]), group=decodeURIComponent(ctx.match[3]);
-  correctionSessions.set(ctx.from.id,{programId,day,muscleGroup:group}); await ctx.answerCallbackQuery();
+  const programId = Number(ctx.match[1]);
+  const day = Number(ctx.match[2]);
+  const group = correctionGroupFromSlug(ctx.match[3]);
+  if (!group) return ctx.answerCallbackQuery({ text: 'Группа не найдена.' });
+  correctionSessions.set(ctx.from.id,{programId,day,muscleGroup:group});
+  await ctx.answerCallbackQuery();
   await showCorrectionExercises(ctx,programId,day,group);
 });
 
-bot.callbackQuery(/^program:correct:catalog:(\d+):(\d+):([^:]+):([^:]+)$/, async (ctx) => {
+bot.callbackQuery(/^program:correct:pick:(\\d+):(\\d+):(\\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const programId=Number(ctx.match[1]), day=Number(ctx.match[2]);
-  const group=decodeURIComponent(ctx.match[3]), exerciseId=decodeURIComponent(ctx.match[4]);
-  correctionSessions.set(ctx.from.id,{programId,day,muscleGroup:group,catalogExerciseId:exerciseId});
-  await ctx.answerCallbackQuery();
-  await ctx.reply(`✏️ <b>${escapeHtml(group)}</b> — упражнение выбрано.\n\nНапиши: заменить текущее, добавить это упражнение, убрать или изменить подходы/повторения.`,{parse_mode:'HTML'});
-});
+  const programId = Number(ctx.match[1]);
+  const dayNumber = Number(ctx.match[2]);
+  const index = Number(ctx.match[3]);
+  const session = correctionSessions.get(ctx.from.id);
+  if (!session || session.programId !== programId || session.day !== dayNumber || !session.catalogChoices?.[index]) {
+    return ctx.answerCallbackQuery({ text: 'Список упражнений устарел. Открой коррекцию заново.' });
+  }
 
-bot.callbackQuery(/^program:correct:back:(\d+)$/, async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  await ctx.answerCallbackQuery(); const programId=Number(ctx.match[1]);
-  const {rows}=await pool.query('SELECT program FROM training_programs WHERE id=$1',[programId]);
-  if(!rows[0]) return ctx.reply('Программа не найдена.');
-  await sendProgramMedia(ctx,rows[0].program as Program,programKeyboard(programId));
+  const exerciseId = session.catalogChoices[index];
+  const group = session.muscleGroup ?? '';
+  const clientId = selectedClient.get(ctx.from.id) ?? ctx.from.id;
+  const programRow = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
+  const current = programRow.rows[0]?.program as Program | undefined;
+  if (!current) return ctx.answerCallbackQuery({ text: 'Программа не найдена.' });
+
+  const exRow = await pool.query(
+    `SELECT id, name, COALESCE(name_ru,'') AS name_ru, gif_url
+     FROM exercise_library WHERE id=$1 AND id LIKE 'anat-%'`,
+    [exerciseId]
+  );
+  const selectedExercise = exRow.rows[0];
+  if (!selectedExercise) return ctx.answerCallbackQuery({ text: 'Упражнение не найдено.' });
+
+  const replacement: Exercise = {
+    name: String(selectedExercise.name_ru || ruExerciseName(selectedExercise.name)),
+    gifUrl: String(selectedExercise.gif_url || ''),
+    sets: 3,
+    reps: current.goal === 'Набор массы' ? '8–12' : '10–15',
+    rest: '60–90 сек',
+    progression: 'Постепенно увеличивать нагрузку или повторения при сохранении техники.',
+    recommendation: 'Контролировать технику и амплитуду; не работать через боль.'
+  };
+
+  const nextProgram: Program = {
+    ...current,
+    days: current.days.map((d) => ({
+      ...d,
+      exercises: d.exercises.map((e) => ({ ...e }))
+    }))
+  };
+  const nextDay = nextProgram.days.find((d) => d.day === dayNumber);
+  if (!nextDay) return ctx.answerCallbackQuery({ text: 'День не найден.' });
+
+  const targetIndex = nextDay.exercises.findIndex((exercise) => exerciseMuscleGroup(exercise.name, nextDay.focus) === group);
+  if (targetIndex >= 0) nextDay.exercises[targetIndex] = replacement;
+  else nextDay.exercises.push(replacement);
+  nextProgram.notes = [...(nextProgram.notes ?? []), `Коррекция: ${group} — ${replacement.name}.`];
+
+  const { rows: versionRows } = await pool.query(
+    'SELECT COALESCE(MAX(version), 0) + 1 AS next_version FROM training_programs WHERE telegram_user_id = $1',
+    [clientId]
+  );
+  const version = Number(versionRows[0].next_version);
+  nextProgram.version = version;
+
+  const saved = await pool.query(
+    `INSERT INTO training_programs (telegram_user_id, version, status, program, correction_request)
+     VALUES ($1,$2,'draft',$3::jsonb,$4) RETURNING id, version`,
+    [clientId, version, JSON.stringify(nextProgram), `День ${dayNumber}, ${group}: ${replacement.name}`]
+  );
+
+  correctionSessions.delete(ctx.from.id);
+  await ctx.answerCallbackQuery({ text: 'Упражнение заменено.' });
+  await ctx.reply(`✅ День ${dayNumber}: «${escapeHtml(replacement.name)}» установлено вместо первого упражнения группы «${escapeHtml(group)}».`, {parse_mode:'HTML'});
+  return sendProgramMedia(ctx, nextProgram, programKeyboard(Number(saved.rows[0].id)));
 });
 
 bot.callbackQuery(/^program:approve:(\d+)$/, async (ctx) => {
