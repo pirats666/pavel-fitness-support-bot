@@ -1394,6 +1394,8 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
   );
 }
 
+const baseBrowserSessions = new Map<number, string[]>();
+
 const EXERCISE_BASE_GROUPS = ['Грудь','Спина','Плечи','Плечевой пояс','Руки','Ноги','Голень','Кор'] as const;
 const EXERCISE_BASE_GROUP_SLUG: Record<string,string> = {
   'Грудь':'ch','Спина':'back','Плечи':'sh','Плечевой пояс':'shoulder-girdle','Руки':'arms','Ноги':'legs','Голень':'calf','Кор':'core'
@@ -1454,10 +1456,15 @@ async function showExerciseBaseList(ctx: any, group: string, environment: string
     [category]
   );
 
+  const userId = ctx.from?.id ?? 0;
+  baseBrowserSessions.set(userId, []);
   const kb = new InlineKeyboard();
   for (const row of rows) {
     const name = String(row.name_ru || row.name || 'Упражнение');
-    kb.text(`🏋️ ${name.slice(0, 34)}`, `base:view:${row.id}`).row();
+    kb.text(`🏋️ ${name.slice(0, 34)}`, `base:view:${baseBrowserSessions.get(ctx.from?.id ?? 0)?.length ?? 0}`).row();
+    const ids = baseBrowserSessions.get(ctx.from?.id ?? 0) ?? [];
+    ids.push(String(row.id));
+    baseBrowserSessions.set(ctx.from?.id ?? 0, ids);
   }
   kb.text('⬅️ Место', `base:group:${EXERCISE_BASE_GROUP_SLUG[group]}`);
 
@@ -2336,10 +2343,13 @@ bot.callbackQuery(/^base:env:([^:]+):(home|gym|outdoor)$/, async (ctx) => {
   await showExerciseBaseList(ctx, group, environment);
 });
 
-bot.callbackQuery(/^base:view:(.+)$/, async (ctx) => {
-  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+bot.callbackQuery(/^base:view:(\\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const index = Number(ctx.match[1]);
+  const exerciseId = baseBrowserSessions.get(ctx.from.id)?.[index];
+  if (!exerciseId) return ctx.answerCallbackQuery({ text: 'Упражнение не найдено. Открой группу заново.' });
   await ctx.answerCallbackQuery();
-  await showExerciseBaseCard(ctx, ctx.match[1]);
+  await showExerciseBaseCard(ctx, exerciseId);
 });
 
 bot.callbackQuery(/^program:correct:group:(\d+):(\d+):([^:]+)$/, async (ctx) => {
