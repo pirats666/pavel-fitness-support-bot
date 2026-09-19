@@ -2657,8 +2657,6 @@ const server = createServer((req, res) => {
 async function main() {
   await pool.query('SELECT 1');
   await ensureDatabase();
-  await seedExerciseLibrary();
-  await syncExerciseCatalog(pool);
   await syncAnatomyExerciseCatalog(pool);
   console.log('Using anatomy catalog version:', ANATOMY_CATALOG_VERSION);
   const integrity = await pool.query(`SELECT
