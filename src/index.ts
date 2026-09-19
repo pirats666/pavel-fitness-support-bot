@@ -42,6 +42,9 @@ type QuizState = {
 };
 
 type Exercise = {
+  id?: string;
+  muscleGroup?: string;
+  movementPattern?: string;
   name: string;
   sets: number;
   reps: string;
@@ -492,12 +495,12 @@ function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desired
 
 async function getLibraryExercises(profile: ProfileForProgram, version: number, fullCatalog = false): Promise<LibraryExercise[]> {
   const equipmentFilter = profile.location === 'gym'
-    ? `equipment <> 'body weight' AND id LIKE 'anat-gym-%'`
+    ? `equipment <> 'body weight' AND id LIKE 'base-gym-%'`
     : profile.location === 'home'
-      ? `equipment = 'body weight' AND id LIKE 'anat-home-%'`
+      ? `equipment = 'body weight' AND id LIKE 'base-home-%'`
       : profile.location === 'outdoor'
-        ? `equipment = 'body weight' AND id LIKE 'anat-outdoor-%'`
-        : `id LIKE 'anat-%'`;
+        ? `equipment = 'body weight' AND id LIKE 'base-outdoor-%'`
+        : `id LIKE 'base-%'`;
 
   const { rows } = await pool.query(
     `SELECT id, name, COALESCE(name_ru,'') AS name_ru, category, COALESCE(body_part_ru,'') AS body_part_ru,
@@ -506,10 +509,7 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number, 
             source_url, gif_url, image_url, training_types, movement_pattern, level, training_contexts
      FROM exercise_library
      WHERE ${equipmentFilter}
-       AND id LIKE 'anat-%'
-       AND gif_url <> ''
-       AND gif_verified = TRUE
-       AND category IN ('upper legs','chest','back','shoulders','waist','lower legs','upper arms','lower arms','cardio')
+       AND category IN ('upper legs','chest','back','shoulders','waist','lower legs','upper arms','lower arms')
      LIMIT 1324`
   );
 
@@ -620,7 +620,10 @@ function exercisePrescription(row: LibraryExercise, profile: ProfileForProgram, 
   if (beginner && difficulty >= 2 && !isMass) reps = '8–12';
 
   return {
-    name: ruExerciseName(row.name),
+    id: row.id,
+    muscleGroup: row.bodyPartRu || row.muscleGroupRu,
+    movementPattern: row.movementPattern,
+    name: row.nameRu || ruExerciseName(row.name),
     gifUrl: row.gifUrl,
     sets,
     reps,
@@ -640,121 +643,159 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     location: String(profile.location),
     workouts_per_week: Number(profile.workouts_per_week),
     workout_duration: Number(profile.workout_duration),
-    limitations: String(profile.limitations ?? '')
+    limitations: String(profile.limitations ?? ''),
+    training_focus: String(profile.training_focus ?? 'auto')
   };
 
   const frequency = Math.min(Math.max(normalizedProfile.workouts_per_week, 1), 5);
   const duration = normalizedProfile.workout_duration;
-  const libraryExercises = await getLibraryExercises(normalizedProfile, version);
-  if (!libraryExercises.length) {
-    throw new Error('No verified anatomy exercises available for this location');
-  }
-  const baseRows = libraryExercises.map((row, i) => exercisePrescription(row, normalizedProfile, i));
-  const poolRows = baseRows;
+  const library = await getLibraryExercises(normalizedProfile, version, true);
+  if (!library.length) throw new Error('No training-base exercises available for this location');
 
-  const isMass = normalizedProfile.goal === 'mass';
-  const beginner = normalizedProfile.experience === 'beginner';
-  const advanced = normalizedProfile.experience === '3plus';
-
-  let daySpecs: Array<{title:string; focus:string; categories:string[]}>;
-  if (frequency === 1) {
-    daySpecs = [{title:'День 1 — Full Body',focus:'Full Body',categories:['chest','back','shoulders','upper legs','upper arms','lower legs','waist']}];
-  } else if (frequency === 2) {
-    daySpecs = [
-      {title:'День 1 — Full Body A',focus:'Full Body A',categories:['chest','back','upper legs','shoulders','upper arms','waist']},
-      {title:'День 2 — Full Body B',focus:'Full Body B',categories:['upper legs','back','chest','shoulders','upper arms','lower legs','waist']}
-    ];
-  } else if (frequency === 3) {
-    daySpecs = [
-      {title:'День 1 — Грудь + руки',focus:'Грудь + руки',categories:['chest','upper arms','lower arms']},
-      {title:'День 2 — Спина + плечи',focus:'Спина + плечи',categories:['back','shoulders']},
-      {title:'День 3 — Ноги',focus:'Ноги',categories:['upper legs','lower legs']}
-    ];
-  } else if (frequency === 4) {
-    daySpecs = [
-      {title:'День 1 — Грудь + руки',focus:'Грудь + руки',categories:['chest','upper arms']},
-      {title:'День 2 — Спина + плечи',focus:'Спина + плечи',categories:['back','shoulders']},
-      {title:'День 3 — Ноги',focus:'Ноги',categories:['upper legs','lower legs']},
-      {title:'День 4 — Функционал + растяжка',focus:'Функционал + растяжка',categories:['waist','upper legs','shoulders','back']}
-    ];
-  } else {
-    daySpecs = [
-      {title:'День 1 — Грудь + руки',focus:'Грудь + руки',categories:['chest','upper arms']},
-      {title:'День 2 — Спина + плечи',focus:'Спина + плечи',categories:['back','shoulders']},
-      {title:'День 3 — Ноги',focus:'Ноги',categories:['upper legs','lower legs']},
-      {title:'День 4 — Функционал + растяжка',focus:'Функционал + растяжка',categories:['waist','upper legs','shoulders','back']},
-      {title:'День 5 — Дополнительный сплит',focus:'Дополнительный сплит',categories:['chest','back','shoulders','upper arms']}
-    ];
-  }
+  const beginner = normalizedProfile.experience === 'beginner' || normalizedProfile.experience === 'under1';
+  const uniqueByName = (rows: LibraryExercise[]) => {
+    const seen = new Set<string>();
+    return rows.filter((row) => {
+      const key = normalizeText(row.nameRu || row.name);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  const candidates = uniqueByName(library)
+    .filter((row) => !beginner || row.level !== 'advanced')
+    .filter((row) => isExerciseAllowed(row, normalizedProfile.limitations ?? ''));
 
   const used = new Set<string>();
-  const days: WorkoutDay[] = daySpecs.map((spec, dayIndex) => {
-    const picked: Exercise[] = [];
-    const localMovement = new Set<string>();
-    for (const category of spec.categories) {
-      const candidates = libraryExercises
-        .filter((row) => row.category === category && !used.has(row.id))
-        .filter((row) => {
-          const t = normalizeText(row.name + ' ' + row.nameRu);
-          if (dayIndex === 0 && isMass && frequency === 3 && category === 'chest') {
-            return !(/decline|ногами на возвыш|отжимания с ногами/.test(t));
-          }
-          return true;
-        })
-        .sort((a,b)=>scoreExercise(b,normalizedProfile,category,used)-scoreExercise(a,normalizedProfile,category,used));
+  const usedNames = new Set<string>();
 
-      for (const row of candidates) {
-        const movement = normalizeText(row.movementPattern);
-        if (localMovement.has(movement)) continue;
-        if (!advanced && /ногами на возвыш|decline push/.test(normalizeText(row.nameRu + ' ' + row.name))) continue;
-        const ex = exercisePrescription(row, normalizedProfile, picked.length);
-        picked.push(ex);
-        used.add(row.id);
-        localMovement.add(movement);
-        if (picked.length >= (duration <= 45 ? 5 : 6)) break;
-      }
-      if (picked.length >= (duration <= 45 ? 5 : 6)) break;
+  const take = (count: number, filter: (row: LibraryExercise) => boolean, preferred?: (row: LibraryExercise) => number) => {
+    const pool = candidates
+      .filter((row) => !used.has(row.id) && !usedNames.has(normalizeText(row.nameRu || row.name)))
+      .filter(filter)
+      .sort((a,b) => (preferred ? preferred(b) - preferred(a) : 0));
+    const result: LibraryExercise[] = [];
+    for (const row of pool) {
+      result.push(row);
+      used.add(row.id);
+      usedNames.add(normalizeText(row.nameRu || row.name));
+      if (result.length >= count) break;
     }
+    return result;
+  };
 
-    // Add secondary categories only if the day is still too short.
-    if (picked.length < 4) {
-      for (const row of libraryExercises) {
-        if (picked.length >= 4) break;
-        if (used.has(row.id)) continue;
-        const ex = exercisePrescription(row, normalizedProfile, picked.length);
-        picked.push(ex);
-        used.add(row.id);
-      }
-    }
+  const priority = (row: LibraryExercise) => {
+    let score = 0;
+    const text = normalizeText(row.nameRu || row.name);
+    if (/присед|жим|тяга|подтяг|отжим|румын|hip thrust|ягодичный мост|выпад/.test(text)) score += 20;
+    if (row.movementPattern && /присед|жим|тяга|сгибание|разгибание|анти|ротац|стабилиз/.test(normalizeText(row.movementPattern))) score += 8;
+    if (row.gifUrl) score += 2;
+    if (row.level === 'beginner') score += beginner ? 8 : 2;
+    if (normalizedProfile.goal === 'mass' && row.trainingTypes.includes('hypertrophy')) score += 8;
+    if (normalizedProfile.goal === 'loss' && row.trainingTypes.includes('endurance')) score += 5;
+    return score;
+  };
 
-    return {
-      day: dayIndex + 1,
-      title: spec.title,
-      focus: spec.focus,
-      warmup: duration <= 45 ? '5–7 минут: общая активизация + динамическая разминка по движениям дня.' : '8–10 минут: общая активизация + динамическая разминка по движениям дня.',
-      exercises: picked,
-      cooldown: '3–5 минут спокойного восстановления и лёгкой подвижности.'
-    };
+  const toExercise = (row: LibraryExercise, index: number): Exercise => exercisePrescription(row, normalizedProfile, index);
+
+  const mainCount = duration <= 45 ? 5 : 6;
+  const makeDay = (day: number, title: string, focus: string, rows: LibraryExercise[]) => ({
+    day,
+    title,
+    focus,
+    warmup: duration <= 45
+      ? '5–7 минут: общая активизация + динамическая разминка суставов и движений дня.'
+      : '8–10 минут: общая активизация + динамическая разминка суставов и движений дня.',
+    exercises: rows.map((row, i) => toExercise(row, i)),
+    cooldown: '5–7 минут: спокойное восстановление и лёгкая мобильность без силовой работы.'
   });
 
-  const format = frequency <= 2 ? 'Full Body' : frequency === 3 ? 'Сплит 3 дня' : frequency === 4 ? 'Сплит 4 дня' : 'Сплит 5 дней';
+  const days: WorkoutDay[] = [];
 
+  if (frequency === 1 || frequency === 2) {
+    const patterns = [
+      ['Грудь','Спина','Ноги','Плечи','Руки','Кор'],
+      ['Ноги','Спина','Грудь','Плечи','Руки','Голень','Кор']
+    ];
+    for (let d = 0; d < frequency; d++) {
+      const rows: LibraryExercise[] = [];
+      for (const group of patterns[d]) {
+        rows.push(...take(1, (r) => r.bodyPartRu === group || r.muscleGroupRu === group, priority));
+        if (rows.length >= mainCount) break;
+      }
+      days.push(makeDay(d + 1, `День ${d + 1} — Full Body${frequency === 2 ? (d === 0 ? ' A' : ' B') : ''}`, 'Full Body', rows.slice(0, mainCount)));
+    }
+  } else {
+    const chest = take(normalizedProfile.location === 'outdoor' ? 1 : 3, (r) => r.category === 'chest', priority);
+    const arms = take(normalizedProfile.location === 'outdoor' ? 2 : 3, (r) => r.category === 'upper arms', priority);
+    let day1Rows = [...chest, ...arms];
+    if (day1Rows.length < 4) {
+      day1Rows.push(...take(4 - day1Rows.length, (r) => ['shoulders','back'].includes(r.category), priority));
+    }
+    days.push(makeDay(1, 'День 1 — Грудь + руки', 'Грудь + руки', day1Rows.slice(0, mainCount)));
+
+    const back = take(normalizedProfile.location === 'outdoor' ? 3 : 3, (r) => r.category === 'back', priority);
+    const shoulders = take(normalizedProfile.location === 'outdoor' ? 1 : 3, (r) => r.category === 'shoulders', priority);
+    let day2Rows = [...back, ...shoulders];
+    if (day2Rows.length < 4) {
+      day2Rows.push(...take(4 - day2Rows.length, (r) => ['back','shoulders'].includes(r.category), priority));
+    }
+    days.push(makeDay(2, 'День 2 — Спина + плечи', 'Спина + плечи', day2Rows.slice(0, mainCount)));
+
+    const legTargets = [
+      /квадриц/i, /ягод/i, /задн.*бедр/i, /привод/i, /голен|икрон|камбал/i
+    ];
+    const legRows: LibraryExercise[] = [];
+    for (const target of legTargets) {
+      legRows.push(...take(1, (r) => r.category === 'upper legs' || r.category === 'lower legs'
+        ? target.test(normalizeText(r.muscleGroupRu + ' ' + r.target + ' ' + r.nameRu))
+        : false, priority));
+    }
+    legRows.push(...take(Math.max(0, mainCount - legRows.length), (r) => ['upper legs','lower legs'].includes(r.category), priority));
+    days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', legRows.slice(0, mainCount)));
+
+    if (frequency >= 4) {
+      const functionalPatterns = [
+        /присед|разгибание колена|выпад/,
+        /разгибание бедра|сгибание колена|тяга/,
+        /жим|горизонтальное приведение/,
+        /горизонтальная тяга|вертикальная тяга/,
+        /антиразгибание|анти-ротация|ротация|контроль корпуса/,
+        /протракция|стабилизация|отведение/
+      ];
+      const functionalRows: LibraryExercise[] = [];
+      for (const pattern of functionalPatterns) {
+        const got = take(1, (r) => pattern.test(normalizeText(r.movementPattern + ' ' + r.nameRu)), priority);
+        if (got[0]) functionalRows.push(got[0]);
+      }
+      if (functionalRows.length < 4) {
+        functionalRows.push(...take(4 - functionalRows.length, (r) => ['waist','upper legs','back','chest','shoulders'].includes(r.category), priority));
+      }
+      days.push(makeDay(4, 'День 4 — Функционал + растяжка', 'Функционал + растяжка', functionalRows.slice(0, Math.max(5, Math.min(6, mainCount)))));
+    }
+
+    if (frequency >= 5) {
+      const extra = take(Math.max(4, Math.min(6, mainCount)), (r) => ['chest','back','shoulders','upper arms','waist'].includes(r.category), priority);
+      days.push(makeDay(5, 'День 5 — Дополнительная тренировка', 'Дополнительный сплит', extra));
+    }
+  }
+
+  const format = frequency <= 2 ? 'Full Body' : `Сплит ${frequency} дней`;
   return {
-    title: format,
+    title: 'Программа',
     goal: ruGoal(normalizedProfile.goal),
     frequency,
     duration,
     location: ruLocation(normalizedProfile.location),
     version,
     weeks: 4,
-    progression: isMass
-      ? '4 недели: сначала довести все рабочие подходы до верхней границы повторений с чистой техникой, затем небольшими шагами увеличить нагрузку и снова начать с нижней границы.'
-      : 'Постепенно увеличивать объём или сопротивление при сохранении техники и восстановлении.',
+    progression: '4 недели: сохраняй технику, постепенно увеличивай повторения до верхней границы диапазона; после стабильного выполнения повышай сопротивление небольшим шагом.',
     days,
     notes: [
-      `Рекомендуемый формат: ${format}.`,
-      'Каждый день имеет отдельную логическую задачу; тяжёлая тренировка ног не объединяется с грудью.',
-      'Внутри дня исключены бессмысленные повторы одного движения; для новичка сложные варианты используются только после освоения базовой версии.',
+      `Источник упражнений: анатомо-тренировочная база, 120 упражнений, разделённых по мышцам и месту тренировок.`,
+      `Формат: ${format}. День 1 — грудь + руки; День 2 — спина + плечи; День 3 — ноги; День 4 — функционал + растяжка.`,
+      'Разминка и заминка отделены от основной тренировки.',
+      'Внутри программы одно и то же упражнение не повторяется.',
       normalizedProfile.limitations ? `Ограничения из анкеты: ${normalizedProfile.limitations}.` : 'Ограничений в анкете не указано.',
       correction ? `Учтена коррекция: ${correction}` : 'Программа сформирована по исходной анкете.'
     ]
@@ -873,6 +914,9 @@ function convertAIPlanToProgram(aiPlan: Awaited<ReturnType<typeof createAIWorkou
       const row = byId.get(item.exerciseId);
       if (!row) throw new Error(`AI exercise not found in catalog: ${item.exerciseId}`);
       return {
+        id: row.id,
+        muscleGroup: row.bodyPartRu || row.muscleGroupRu,
+        movementPattern: row.movementPattern,
         name: row.nameRu || ruExerciseName(row.name),
         gifUrl: row.gifUrl,
         sets: item.sets,
@@ -914,61 +958,10 @@ async function createProgram(userId: number, correction = '') {
   );
   const version = Number(versionRows[0].next_version);
 
-  let program: Program;
-  if (aiEnabled()) {
-    try {
-      const frequency = Math.min(Math.max(Number(profile.workouts_per_week), 1), 5);
-      const aiCandidates = await getLibraryExercises({
-        goal: String(profile.goal),
-        experience: String(profile.experience),
-        location: String(profile.location),
-        workouts_per_week: frequency,
-        workout_duration: Number(profile.workout_duration),
-        limitations: String(profile.limitations ?? ''),
-        training_focus: String(profile.training_focus ?? 'auto')
-      }, version);
-
-      const allExerciseNameRows = await pool.query(
-        'SELECT COALESCE(NULLIF(name_ru, \'\'), name) AS name FROM exercise_library ORDER BY id'
-      );
-      const allExerciseNames = allExerciseNameRows.rows.map((row: any) => String(row.name)).filter(Boolean);
-
-      const aiProfile: AIPlannerProfile = {
-        goal: String(profile.goal),
-        experience: String(profile.experience),
-        location: String(profile.location),
-        workoutsPerWeek: frequency,
-        workoutDuration: Number(profile.workout_duration),
-        limitations: String(profile.limitations ?? ''),
-        trainingFocus: String(profile.training_focus ?? 'auto')
-      };
-
-      const candidates: AIExerciseCandidate[] = aiCandidates.map((e) => ({
-        id: e.id,
-        nameRu: e.nameRu || ruExerciseName(e.name),
-        bodyPartRu: e.bodyPartRu,
-        equipmentRu: e.equipmentRu,
-        muscleGroupRu: e.muscleGroupRu,
-        trainingTypes: e.trainingTypes,
-        trainingContexts: e.trainingContexts,
-        movementPattern: e.movementPattern,
-        level: e.level,
-        instructionsRu: e.instructionsRu,
-        gifUrl: e.gifUrl
-      }));
-
-      const aiPlan = await createAIWorkoutPlan(aiProfile, candidates, correction, allExerciseNames);
-      // Use the validated AI plan when available. Deterministic planning is the fallback only.
-      const aiProgram = aiPlan ? convertAIPlanToProgram(aiPlan, profile, version, aiCandidates, correction) : null;
-      program = aiProgram ?? await buildProgram(profile, version, correction);
-      console.log('Program planning completed', { userId, version, source: aiProgram ? 'ai' : 'deterministic', aiFormat: aiPlan?.format ?? 'none' });
-    } catch (error) {
-      console.error('AI program failed; using deterministic planner', error);
-      program = await buildProgram(profile, version, correction);
-    }
-  } else {
-    program = await buildProgram(profile, version, correction);
-  }
+  // The workbook is authoritative. AI is not allowed to substitute exercises,
+  // invent movements, or change the fixed split.
+  const program = await buildProgram(profile, version, correction);
+  console.log('Program planning completed', { userId, version, source: 'training-workbook' });
 
   const { rows } = await pool.query(
     `INSERT INTO training_programs (telegram_user_id, version, status, program, correction_request)
@@ -1309,7 +1302,10 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
 
   const program = rows[0].program as Program;
   const day = program.days.find((d) => d.day === dayNumber);
-  const targetExerciseIndex = day?.exercises.findIndex((exercise) => exerciseMuscleGroup(exercise.name, day.focus) === group) ?? -1;
+  const targetExerciseIndex = day?.exercises.findIndex((exercise) =>
+    exercise.muscleGroup === group ||
+    exerciseMuscleGroup(exercise.name, day.focus) === group
+  ) ?? -1;
   if (targetExerciseIndex < 0) return ctx.reply('В выбранном дне нет упражнения этой группы.');
 
   correctionSessions.set(ctx.from?.id ?? 0, {
@@ -1328,7 +1324,7 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
   kb.text('⬅️ Группы', `program:correct:day:${programId}:${dayNumber}`);
 
   await ctx.reply(
-    `💪 <b>${escapeHtml(group)}</b>\\n\\nВсе упражнения этой группы из анатомической базы для текущего места тренировок.\\nВыбери упражнение — оно заменит текущее упражнение этой группы в выбранном дне.`,
+    `💪 <b>${escapeHtml(group)}</b>\n\nУпражнения из нашей анатомо-тренировочной базы для текущего места тренировок.\nВыбери упражнение — оно заменит текущее упражнение этой группы в выбранном дне.`,
     {parse_mode:'HTML',reply_markup:kb}
   );
 }
