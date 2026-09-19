@@ -25,6 +25,7 @@ export async function migrateStage1Schema(): Promise<void> {
   await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS training_location TEXT`);
   await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS limitations TEXT NOT NULL DEFAULT ''`);
   await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT ''`);
+  await pool.query(`DELETE FROM public.clients WHERE telegram_username = 'pavelmoment' AND name IS NULL`);
   await pool.query(`UPDATE public.clients SET name = COALESCE(name, CASE WHEN telegram_username IS NULL THEN 'Клиент' ELSE '@' || telegram_username END)`);
   await pool.query(`ALTER TABLE public.clients ALTER COLUMN name SET NOT NULL`);
   await pool.query(`ALTER TABLE public.clients ALTER COLUMN age SET NOT NULL`);
