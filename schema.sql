@@ -1,8 +1,8 @@
 CREATE TABLE IF NOT EXISTS public.clients (
   id BIGSERIAL PRIMARY KEY,
-  telegram_user_id BIGINT NOT NULL,
+  telegram_user_id BIGINT,
   telegram_username TEXT,
-  telegram_first_name TEXT NOT NULL,
+  telegram_first_name TEXT,
   telegram_last_name TEXT,
   age INTEGER NOT NULL CHECK (age BETWEEN 1 AND 120),
   height_cm NUMERIC(5,2) NOT NULL CHECK (height_cm > 0 AND height_cm <= 300),
