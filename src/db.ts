@@ -36,7 +36,7 @@ export async function createClient(draft: ClientDraft): Promise<Client> {
 }
 export async function updateClientField(id: number, field: keyof ClientDraft, value: string | number | null): Promise<Client | null> {
   const allowed: Record<keyof ClientDraft, true> = {
-    telegram_user_id:true, telegram_username:true, telegram_first_name:true, telegram_last_name:true,
+    name:true, telegram_user_id:true, telegram_username:true, telegram_first_name:true, telegram_last_name:true,
     age:true, height_cm:true, weight_kg:true, goal:true, experience:true,
     workouts_per_week:true, training_location:true, limitations:true, note:true
   };
