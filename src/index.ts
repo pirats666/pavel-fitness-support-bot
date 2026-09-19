@@ -744,71 +744,37 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
       days.push(makeDay(d + 1, `День ${d + 1} — Full Body${frequency === 2 ? (d === 0 ? ' A' : ' B') : ''}`, 'Full Body', rows.slice(0, duration <= 45 ? 6 : 7)));
     }
   } else {
-    // DAY 1: CHEST + ARMS
-    // Target structure requested by Pavel:
-    // chest 4, biceps 2, triceps 2 = 8 exercises.
-    const day1Chest = take(4, byGroup('Грудь'), priority);
+    // DAY 1: CHEST + ARMS — compact working session.
+    const day1Chest = take(2, byGroup('Грудь'), priority);
     const day1Biceps = take(2, byTarget('Руки', /бицепс|biceps|brachialis|плечевая/), priority);
     const day1Triceps = take(2, byTarget('Руки', /трицепс|triceps/), priority);
     const day1Rows = [...day1Chest, ...day1Biceps, ...day1Triceps];
-    if (day1Rows.length < 8) {
-      day1Rows.push(...take(8 - day1Rows.length, (r) => byGroup('Руки')(r), priority));
-    }
-    days.push(makeDay(1, 'День 1 — Грудь + руки', 'Грудь + руки', day1Rows.slice(0, 8)));
+    days.push(makeDay(1, 'День 1 — Грудь + руки', 'Грудь + руки', day1Rows.slice(0, duration <= 45 ? 4 : 6)));
 
-    // DAY 2: BACK + SHOULDERS
-    // 5 back + 3 shoulders = 8, selected across the whole catalog.
-    const day2Back = take(5, byGroup('Спина'), priority);
+    // DAY 2: BACK + SHOULDERS — compact, no filler exercises.
+    const day2Back = take(3, byGroup('Спина'), priority);
     const day2Shoulders = take(3, byGroup('Плечи'), priority);
     const day2Rows = [...day2Back, ...day2Shoulders];
-    if (day2Rows.length < 8) {
-      day2Rows.push(...take(8 - day2Rows.length, (r) => byGroup('Плечевой пояс')(r), priority));
-    }
-    days.push(makeDay(2, 'День 2 — Спина + плечи', 'Спина + плечи', day2Rows.slice(0, 8)));
+    days.push(makeDay(2, 'День 2 — Спина + плечи', 'Спина + плечи', day2Rows.slice(0, duration <= 45 ? 4 : 6)));
 
-    // DAY 3: LEGS
-    // Cover the major lower-body functions instead of dumping random leg exercises.
+    // DAY 3: LEGS — cover the major lower-body functions without collecting every variation.
     const day3Quads = take(2, byTarget('Ноги', /квадрицепс|quadriceps|quad/), priority);
-    const day3Glutes = take(2, byTarget('Ноги', /ягодич|glute/), priority);
-    const day3Hamstrings = take(2, byTarget('Ноги', /задняя поверхность бедра|hamstring|biceps femoris|semitendinosus|semimembranosus/), priority);
-    const day3Adductors = take(1, byTarget('Ноги', /приводящ|adductor/), priority);
+    const day3Glutes = take(1, byTarget('Ноги', /ягодич|glute/), priority);
+    const day3Hamstrings = take(1, byTarget('Ноги', /задняя поверхность бедра|hamstring|biceps femoris|semitendinosus|semimembranosus/), priority);
     const day3Calves = take(1, (r) => byGroup('Голень')(r), priority);
-    const day3Rows = [...day3Quads, ...day3Glutes, ...day3Hamstrings, ...day3Adductors, ...day3Calves];
-    if (day3Rows.length < 8) {
-      day3Rows.push(...take(8 - day3Rows.length, (r) => byGroup('Ноги')(r), priority));
-    }
-    days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', day3Rows.slice(0, 8)));
+    const day3Core = take(1, byGroup('Кор'), priority);
+    const day3Rows = [...day3Quads, ...day3Glutes, ...day3Hamstrings, ...day3Calves, ...day3Core];
+    days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', day3Rows.slice(0, duration <= 45 ? 4 : 6)));
 
-    // DAY 4: FUNCTIONAL + STRETCHING
-    // Functional work is selected by movement patterns, not by a muscle split.
-    if (frequency >= 4) {
-      const functionalPatterns = [
-        /присед|squat/,
-        /hinge|разгибание бедра|сгибание колена|deadlift|румын/,
-        /жим|push|press|горизонтальное приведение/,
-        /тяга|pull|row|вертикальная тяга|горизонтальная тяга/,
-        /антиразгибание|anti-extension|анти-ротация|anti-rotation|ротац|rotation|core|кор/,
-        /переноск|carry|стабилиз|stabil|координац|balance/
-      ];
-      const functionalRows: LibraryExercise[] = [];
-      for (const pattern of functionalPatterns) {
-        const got = take(1, (r) => pattern.test(normalize(`${r.movementPattern} ${r.nameRu} ${r.name} ${r.target}`)), priority);
-        if (got[0]) functionalRows.push(got[0]);
-      }
-      if (functionalRows.length < 6) {
-        functionalRows.push(...take(6 - functionalRows.length, (r) =>
-          ['waist','upper legs','back','chest','shoulders'].includes(r.category), priority));
-      }
-      days.push(makeDay(4, 'День 4 — Функционал + растяжка', 'Функционал + растяжка', functionalRows.slice(0, 6)));
-    }
+    // DAY 4: FUNCTIONAL + STRETCHING — one exercise per movement pattern.
 
     if (frequency >= 5) {
       const day5Rows = [
-        ...take(3, byGroup('Грудь'), priority),
-        ...take(3, byGroup('Спина'), priority),
+        ...take(2, byGroup('Грудь'), priority),
+        ...take(2, byGroup('Спина'), priority),
         ...take(2, byGroup('Плечи'), priority)
       ];
-      days.push(makeDay(5, 'День 5 — Верх тела', 'Верх тела', day5Rows.slice(0, 8)));
+      days.push(makeDay(5, 'День 5 — Верх тела', 'Верх тела', day5Rows.slice(0, duration <= 45 ? 4 : 6)));
     }
   }
 
@@ -825,7 +791,7 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     days,
     notes: [
       'Источник упражнений: полный каталог exercise_library; подбор ограничен структурой дня, мышечной группой, локацией и доступным оборудованием.',
-      `Формат: ${format}. День 1 — грудь + руки (4 грудь + 2 бицепс + 2 трицепс); День 2 — спина + плечи; День 3 — ноги; День 4 — функционал + растяжка.`,
+      `Формат: ${format}. Основной сплит: День 1 — грудь + руки; День 2 — спина + плечи; День 3 — ноги; День 4 — функционал + растяжка; 5-й день — дополнительный верх только при частоте 5.`,
       'Разминка и заминка отделены от основной тренировки.',
       'Внутри одной программы одно и то же упражнение не повторяется.',
       normalizedProfile.limitations ? `Ограничения из анкеты: ${normalizedProfile.limitations}.` : 'Ограничений в анкете не указано.',
