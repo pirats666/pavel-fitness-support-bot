@@ -343,7 +343,7 @@ function buildInstructions(profile: AIPlannerProfile, exercises: AIExerciseCandi
     '',
     'Требования к результату:',
     '1) days должно содержать ровно ' + profile.workoutsPerWeek + ' тренировок.',
-    '2) В каждой тренировке используй 4–8 упражнений в зависимости от времени.',
+    '2) В каждой тренировке используй 3–6 упражнений в зависимости от времени.',
     '3) exerciseId должен быть только из каталога.',
     '4) Каждый тренировочный день сначала должен покрыть ключевые мышечные группы, затем можно добавлять дополнительные упражнения.',
     '5) Для каждой локации используй только её оборудование; комбинированный формат проверяй по дню.',
@@ -360,7 +360,7 @@ function buildInstructions(profile: AIPlannerProfile, exercises: AIExerciseCandi
     '12) cooldown — только описание отдельной заминки; не помещай упражнения заминки в exercises.',
     '13) Каждая основная тренировка должна иметь понятный приоритет: крупные многосуставные движения/ключевые паттерны в начале, затем вспомогательная работа.',
     '14) Не допускай бессмысленного дублирования одинакового движения или одной и той же мышечной нагрузки без причины.',
-    'ЖЁСТКОЕ ПРАВИЛО РАЗНООБРАЗИЯ НЕДЕЛИ: не используй один и тот же exerciseId в разных днях одной программы. Каждый день должен иметь собственный набор упражнений. Повторять можно только анатомическую группу/двигательный паттерн, но через другую конкретную вариацию из каталога.',
+    'Внутри одного дня не повторяй exerciseId. Между разными днями повторение допустимо, если это логично для частоты и цели; не создавай искусственные вариации только ради уникальности.',
     '15) Если времени мало, сначала оставь ключевые упражнения по цели и сократи вспомогательные, а не убирай разминку и не превращай разминку в основную тренировку.',
     '16) Для наклонного жима штанги обязательно указывай угол скамьи 30–45° в названии или comment. Это отдельное упражнение от обычного жима лёжа.'
   ].join('\n');
@@ -375,7 +375,7 @@ function validatePlan(plan: AIWorkoutPlan, profile: AIPlannerProfile, catalog: A
   const seen = new Set<string>();
 
   for (const day of plan.days) {
-    if (!Array.isArray(day.exercises) || day.exercises.length < 4 || day.exercises.length > 8) {
+    if (!Array.isArray(day.exercises) || day.exercises.length < 3 || day.exercises.length > 6) {
       throw new Error('AI returned invalid exercise count');
     }
 
@@ -385,10 +385,6 @@ function validatePlan(plan: AIWorkoutPlan, profile: AIPlannerProfile, catalog: A
       if (daySeen.has(ex.exerciseId)) {
         throw new Error('AI repeated an exercise inside one workout day');
       }
-      if (seen.has(ex.exerciseId)) {
-        throw new Error('AI repeated an exercise across different workout days');
-      }
-
       const selected = catalog.find((item) => item.id === ex.exerciseId);
       if (profile.location === 'gym' && selected?.equipmentRu.startsWith('Собственный вес')) {
         throw new Error('AI selected a bodyweight-only exercise for a gym program');
@@ -401,12 +397,6 @@ function validatePlan(plan: AIWorkoutPlan, profile: AIPlannerProfile, catalog: A
       daySeen.add(ex.exerciseId);
       seen.add(ex.exerciseId);
     }
-  }
-
-  // With a multi-day program, variety is a hard requirement: a new day must not
-  // simply be a copy of another day with different text or set counts.
-  if (seen.size < profile.workoutsPerWeek * 4) {
-    throw new Error('AI plan does not contain enough unique exercises for all workout days');
   }
 }
 
