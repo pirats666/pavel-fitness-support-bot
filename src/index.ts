@@ -32,7 +32,7 @@ const MAIN_MENU = new InlineKeyboard().text('👤 Клиенты','clients').row
 
 function isAdmin(ctx: Context) { return ctx.from?.id === ADMIN_ID; }
 function esc(v: unknown) { return String(v ?? '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]!)); }
-function mainText() { return '👋 Добро пожаловать в рабочий кабинет тренера.\\n\\n<b>Главное меню:</b>'; }
+function mainText() { return '👋 Добро пожаловать в рабочий кабинет тренера.\n\n<b>Главное меню:</b>'; }
 
 async function render(ctx: Context, text: string, keyboard?: InlineKeyboard) {
   if (ctx.callbackQuery?.message) {
@@ -51,7 +51,7 @@ function clientsKeyboard(clients: Client[]) {
 }
 async function showClients(ctx: Context) {
   const clients = await listClients();
-  await render(ctx, clients.length ? '👤 <b>КЛИЕНТЫ</b>' : '👤 <b>КЛИЕНТЫ</b>\\n\\nУ вас пока нет клиентов.', clientsKeyboard(clients));
+  await render(ctx, clients.length ? '👤 <b>КЛИЕНТЫ</b>' : '👤 <b>КЛИЕНТЫ</b>\n\nУ вас пока нет клиентов.', clientsKeyboard(clients));
 }
 
 function goalLabel(key:string) { return Object.fromEntries(GOALS.map(([l,k])=>[k.slice(5),l]))[key] ?? key; }
@@ -68,7 +68,7 @@ function clientCard(c:Client) {
     `⚠️ Ограничения: ${esc(c.limitations) || 'Нет'}`,
     `📝 Заметка: ${esc(c.note) || 'Нет'}`, '',
     `Дата добавления: ${new Date(c.created_at).toLocaleString('ru-RU')}`
-  ].join('\\n');
+  ].join('\n');
 }
 function clientActions(id:number) {
   return new InlineKeyboard().text('✏️ Редактировать','client:edit:'+id).row()
@@ -115,7 +115,7 @@ function complete(d:Partial<ClientDraft>): d is ClientDraft {
 function summary(d:ClientDraft) {
   return ['👤 <b>Новый клиент</b>','',`Telegram: ${esc(d.telegram_username ? '@'+d.telegram_username : [d.telegram_first_name,d.telegram_last_name].filter(Boolean).join(' '))}`,`Возраст: ${d.age}`,`Рост: ${d.height_cm} см`,`Вес: ${d.weight_kg} кг`,'',
     `🎯 Цель: ${esc(d.goal)}`,`🏋️ Опыт: ${esc(d.experience)}`,`📅 Тренировок в неделю: ${d.workouts_per_week===5?'5+':d.workouts_per_week}`,
-    `📍 Место: ${esc(d.training_location)}`,`⚠️ Ограничения: ${esc(d.limitations)||'Нет'}`,`📝 Заметка: ${esc(d.note)||'Нет'}`].join('\\n');
+    `📍 Место: ${esc(d.training_location)}`,`⚠️ Ограничения: ${esc(d.limitations)||'Нет'}`,`📝 Заметка: ${esc(d.note)||'Нет'}`].join('\n');
 }
 function confirmKb() { return new InlineKeyboard().text('✅ Сохранить','client:save').row().text('✏️ Изменить','client:change').row().text('❌ Отмена','client:add-cancel'); }
 
@@ -160,7 +160,7 @@ bot.callbackQuery('limit:no',async ctx=>{const s=addSessions.get(ctx.from.id);if
 bot.callbackQuery('limit:yes',async ctx=>{const s=addSessions.get(ctx.from.id);if(!s||s.step!=='limitations_choice')return;await ctx.answerCallbackQuery();s.step='limitations_text';await promptAdd(ctx,s);});
 bot.callbackQuery('note:skip',async ctx=>{const s=addSessions.get(ctx.from.id);if(!s||s.step!=='note')return;await ctx.answerCallbackQuery();s.draft.note='Нет';if(complete(s.draft))await render(ctx,summary(s.draft),confirmKb());});
 
-bot.callbackQuery('client:save',async ctx=>{await ctx.answerCallbackQuery();const s=addSessions.get(ctx.from.id);if(!s||!complete(s.draft))return;try{const c=await createClient(s.draft);addSessions.delete(ctx.from.id);await render(ctx,'✅ Клиент успешно добавлен.\\n\\n'+clientCard(c),clientActions(c.id));}catch(e){console.error(e);await render(ctx,'Не удалось сохранить клиента. Попробуйте ещё раз.',new InlineKeyboard().text('⬅️ К клиентам','clients'));}});
+bot.callbackQuery('client:save',async ctx=>{await ctx.answerCallbackQuery();const s=addSessions.get(ctx.from.id);if(!s||!complete(s.draft))return;try{const c=await createClient(s.draft);addSessions.delete(ctx.from.id);await render(ctx,'✅ Клиент успешно добавлен.\n\n'+clientCard(c),clientActions(c.id));}catch(e){console.error('[DB INSERT] Failed to save client:', e);await render(ctx,'❌ Не удалось сохранить клиента. Попробуйте ещё раз.',new InlineKeyboard().text('⬅️ К клиентам','clients'));}});
 bot.callbackQuery('client:change',async ctx=>{await ctx.answerCallbackQuery();const s=addSessions.get(ctx.from.id);if(!s||!complete(s.draft))return;await render(ctx,'✏️ <b>Что изменить?</b>',new InlineKeyboard() .text('Возраст','addedit:age').row().text('Рост','addedit:height').text('Вес','addedit:weight').row().text('Цель','addedit:goal').text('Опыт','addedit:experience').row().text('Тренировки','addedit:frequency').text('Место','addedit:location').row().text('Ограничения','addedit:limitations').text('Заметка','addedit:note').row().text('⬅️ К подтверждению','addedit:back'));});
 
 const addFieldSteps:Record<string,AddSession['step']>={age:'age',height:'height',weight:'weight',goal:'goal',experience:'experience',frequency:'frequency',location:'location',limitations:'limitations_text',note:'note'};
@@ -168,7 +168,7 @@ bot.callbackQuery(/addedit:(.+)/,async ctx=>{const key=ctx.match[1];const s=addS
 
 bot.callbackQuery(/client:view:(\\d+)/,async ctx=>{await ctx.answerCallbackQuery();await showClient(ctx,Number(ctx.match[1]));});
 bot.callbackQuery(/client:edit:(\\d+)/,async ctx=>{await ctx.answerCallbackQuery();await render(ctx,'✏️ <b>Что изменить?</b>',editMenu(Number(ctx.match[1])));});
-bot.callbackQuery(/client:delete:(\\d+)/,async ctx=>{await ctx.answerCallbackQuery();const id=Number(ctx.match[1]);await render(ctx,'Вы действительно хотите удалить клиента?\\n\\nЭто действие нельзя отменить.',new InlineKeyboard().text('❌ Нет','client:view:'+id).text('🗑 Да, удалить','client:delete-confirm:'+id));});
+bot.callbackQuery(/client:delete:(\\d+)/,async ctx=>{await ctx.answerCallbackQuery();const id=Number(ctx.match[1]);await render(ctx,'Вы действительно хотите удалить клиента?\n\nЭто действие нельзя отменить.',new InlineKeyboard().text('❌ Нет','client:view:'+id).text('🗑 Да, удалить','client:delete-confirm:'+id));});
 bot.callbackQuery(/client:delete-confirm:(\\d+)/,async ctx=>{await ctx.answerCallbackQuery();const ok=await deleteClient(Number(ctx.match[1]));if(ok)await showClients(ctx);else await render(ctx,'Клиент уже удалён.',new InlineKeyboard().text('⬅️ К клиентам','clients'));});
 
 const editPrompts:Partial<Record<keyof ClientDraft,string>>={
