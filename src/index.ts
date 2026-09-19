@@ -1472,9 +1472,11 @@ async function getExerciseBaseRows(group: string, environment: string) {
     `SELECT id, name_ru, name, equipment_ru, level
      FROM exercise_library
      WHERE category = $1
+       AND id LIKE 'base-%'
+       AND catalog_version = $2
        AND ${exerciseBaseEquipmentFilter(environment)}
-     ORDER BY name_ru NULLS LAST, name, id`,
-    [category]
+     ORDER BY id`,
+    [category, ANATOMY_CATALOG_VERSION]
   );
   return rows;
 }
