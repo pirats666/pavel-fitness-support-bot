@@ -1,6 +1,9 @@
 export type Client = {
   id: number;
-  name: string;
+  telegram_user_id: number;
+  telegram_username: string | null;
+  telegram_first_name: string;
+  telegram_last_name: string | null;
   age: number;
   height_cm: number;
   weight_kg: number;
@@ -17,7 +20,7 @@ export type Client = {
 export type ClientDraft = Omit<Client, 'id' | 'created_at' | 'updated_at'>;
 
 export type AddStep =
-  | 'name' | 'age' | 'height' | 'weight' | 'goal' | 'custom_goal'
+  | 'age' | 'height' | 'weight' | 'goal' | 'custom_goal'
   | 'experience' | 'frequency' | 'location' | 'limitations_choice'
   | 'limitations_text' | 'note';
 
