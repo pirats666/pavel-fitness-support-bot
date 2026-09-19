@@ -606,6 +606,21 @@ function exerciseRecommendation(profile: ProfileForProgram, row: LibraryExercise
   return 'Контролировать амплитуду и технику; оставлять небольшой запас повторений и не доводить каждый подход до отказа.';
 }
 
+function displayExerciseName(row: LibraryExercise) {
+  const name = String(row.nameRu || ruExerciseName(row.name)).trim();
+  const equipment = String(row.equipmentRu || '').trim();
+  const n = normalizeText(name);
+  if (/тяга каната к лицу/.test(n) && equipment) return `Тяга каната к лицу — ${equipment.replace('; ', ' / ')}`;
+  if (/тяга к подбородку/.test(n) && equipment) return `Тяга к подбородку — ${equipment}`;
+  if (/махи гантелями в стороны/.test(n)) return 'Махи гантелями в стороны';
+  if (/махи в стороны/.test(n) && equipment) return `Махи в стороны — ${equipment}`;
+  if (/тяга гантели/.test(n)) return 'Тяга гантели к поясу';
+  if (/разведения назад/.test(n) && equipment) return `Разведения назад — ${equipment}`;
+  if (/разведение рук/.test(n) && equipment) return `Разведение рук — ${equipment}`;
+  if (/пулловер/.test(n) && equipment) return `Пулловер — ${equipment}`;
+  return name;
+}
+
 function exercisePrescription(row: LibraryExercise, profile: ProfileForProgram, index: number): Exercise {
   const beginner = profile.experience === 'beginner' || profile.experience === 'under1';
   const isMass = profile.goal === 'mass';
@@ -625,7 +640,7 @@ function exercisePrescription(row: LibraryExercise, profile: ProfileForProgram, 
     id: row.id,
     muscleGroup: row.muscleGroupRu || row.bodyPartRu,
     movementPattern: row.movementPattern,
-    name: row.nameRu || ruExerciseName(row.name),
+    name: displayExerciseName(row),
     sets,
     reps,
     rest: index < 4 ? (isMass ? '90–120 сек' : '60–90 сек') : '45–60 сек',
