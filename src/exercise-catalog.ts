@@ -1,9 +1,8 @@
 import type { Pool } from 'pg';
 import { ANATOMY_EXERCISES, ANATOMY_CATALOG_VERSION } from './anatomy-exercise-catalog.js';
 
-const CATALOG_VERSION = '2026-09-r3';
+const CATALOG_VERSION = '2026-09-r4';
 const SOURCE_JSON = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/data/exercises.json';
-const MEDIA_BASE = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/';
 
 function norm(value: string) {
   return String(value ?? '').toLowerCase().replace(/ё/g, 'е').trim();
@@ -176,41 +175,12 @@ function trainingContexts(name: string, category: string, equipment: string, tar
 }
 
 export async function syncAnatomyExerciseCatalog(pool: Pool) {
-  const mediaRows = await pool.query(
-    `SELECT name, COALESCE(name_ru, '') AS name_ru, equipment, category, target, muscle_group, gif_url, image_url
-     FROM exercise_library
-     WHERE id NOT LIKE 'anat-%' AND id NOT LIKE 'base-%' AND gif_url <> ''`
-  );
-
-  const media = mediaRows.rows.map((row: any) => ({
-    name: String(row.name ?? ''),
-    nameRu: String(row.name_ru ?? ''),
-    equipment: String(row.equipment ?? ''),
-    category: String(row.category ?? ''),
-    gifUrl: String(row.gif_url ?? ''),
-    imageUrl: String(row.image_url ?? '')
-  }));
-
-  const normalize = (value: string) => String(value ?? '')
-    .toLowerCase().replace(/ё/g,'е').replace(/[^a-zа-я0-9]+/gi,' ').trim();
-
-  const mediaForExercise = (ex: typeof ANATOMY_EXERCISES[number]) => {
-    const wanted = normalize(ex.name);
-    const exact = media.find((item) => {
-      if (ex.environment === 'gym') {
-        if (item.equipment === 'body weight') return false;
-      } else if (item.equipment !== 'body weight') {
-        return false;
-      }
-      if (item.category && item.category !== ex.category) return false;
-      return normalize(item.nameRu || item.name) === wanted || normalize(item.name) === wanted;
-    });
-    return exact ? { gifUrl: exact.gifUrl, imageUrl: exact.imageUrl } : { gifUrl: '', imageUrl: '' };
-  };
+  const mediaForExercise = (_ex: typeof ANATOMY_EXERCISES[number]) => ({ gifUrl: '', imageUrl: '' });
 
   // The workbook is the source of truth for the program generator.
   // Remove the previous generated anatomy catalog so stale exercises cannot leak
   // into new programs or correction choices.
+  await pool.query(`UPDATE exercise_library SET gif_url='', image_url=''`);
   await pool.query(`DELETE FROM exercise_library WHERE id LIKE 'anat-%' OR id LIKE 'base-%'`);
 
   for (const ex of ANATOMY_EXERCISES) {
