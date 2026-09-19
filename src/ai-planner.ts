@@ -137,7 +137,7 @@ function canonicalMuscleGroup(e: AIExerciseCandidate): string {
   if (/груд|pector|жим лёжа|жим лежа|отжиман|сведен.*груд/.test(s)) return 'грудь';
   if (/спин|широч|тяга|подтяг/.test(s)) return 'спина';
   if (/кардио|бег|ходьб|велотр|эллип|степ/.test(s)) return 'кардио';
-  return e.category === 'cardio' ? 'кардио' : 'спина';
+  return /cardio|кардио/.test(s) ? 'кардио' : 'спина';
 }
 
 const MUSCLE_MAP = [
