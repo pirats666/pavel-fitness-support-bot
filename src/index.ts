@@ -124,7 +124,7 @@ function confirmKb() { return new InlineKeyboard().text('✅ Сохранить'
 
 function editMenu(id:number) {
   return new InlineKeyboard()
-      .text('Возраст','editfield:'+id+':age').row()
+      .text('👤 Telegram','editfield:'+id+':telegram_username').row().text('🎂 Возраст','editfield:'+id+':age').row()
      .text('Рост','editfield:'+id+':height_cm').text('Вес','editfield:'+id+':weight_kg').row()
     .text('Цель','editfield:'+id+':goal').text('Опыт','editfield:'+id+':experience').row()
     .text('Тренировки в неделю','editfield:'+id+':workouts_per_week').row()
@@ -176,11 +176,13 @@ bot.callbackQuery(/client:delete:(\d+)/,async ctx=>{const callbackData=ctx.callb
 bot.callbackQuery(/client:delete-confirm:(\d+)/,async ctx=>{const callbackData=ctx.callbackQuery.data;const id=Number(ctx.match[1]);console.info('[CONFIRM DELETE CLIENT CLICK] callback_data=%s client_id=%s',callbackData,id);await ctx.answerCallbackQuery();const client=await getClient(id);if(!client){console.warn('[DELETE CONFIRM NOT FOUND] client_id=%s',id);await render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));return;}const ok=await deleteClient(id);console.info('[CLIENT DELETE RESULT] client_id=%s deleted=%s',id,ok);if(ok)await render(ctx,'✅ Клиент удалён.',new InlineKeyboard().text('⬅️ К клиентам','clients'));else await render(ctx,'❌ Не удалось удалить клиента.',new InlineKeyboard().text('⬅️ К клиентам','clients'));});
 
 const editPrompts:Partial<Record<keyof ClientDraft,string>>={
+  telegram_username:'Введите Telegram username клиента или нажмите «Пропустить»:',
   age:'Введите возраст клиента:',height_cm:'Введите рост клиента в см:',weight_kg:'Введите текущий вес клиента в кг:',
   goal:'Выберите основную цель клиента:',experience:'Выберите тренировочный опыт:',workouts_per_week:'Сколько тренировок в неделю планируется?',
   training_location:'Где клиент будет тренироваться?',limitations:'Введите ограничения текстом:',note:'Введите дополнительную заметку:'
 };
 bot.callbackQuery(/editfield:(\d+):(.+)/,async ctx=>{const id=Number(ctx.match[1]);const field=ctx.match[2] as keyof ClientDraft;const allowed=Object.keys(editPrompts);if(!allowed.includes(field) || !editPrompts[field])return;await ctx.answerCallbackQuery();editSessions.set(ctx.from.id,{clientId:id,field});await render(ctx,editPrompts[field]!,editChoices(field));});
+bot.callbackQuery('edittelegram:skip',async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='telegram_username')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'telegram_username',null);editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
 bot.callbackQuery('editcancel',async ctx=>{await ctx.answerCallbackQuery();const s=editSessions.get(ctx.from.id);editSessions.delete(ctx.from.id);if(s)await showClient(ctx,s.clientId);});
 for(const [label,data] of GOALS) bot.callbackQuery('edit:'+data,async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='goal')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'goal',label);editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
 for(const [label,data] of EXPERIENCES) bot.callbackQuery('edit:'+data,async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='experience')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'experience',label);editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
@@ -218,10 +220,10 @@ bot.on('message:text',async ctx=>{
   if(edit){
     try{
       let value:string|number=t;
-      if(edit.field==='age'){const n=Number(t);if(!/^\\d+$/.test(t)||!Number.isInteger(n)||n<1||n>120)return ctx.reply('Введите возраст числом.');value=n;}
+      if(edit.field==='age'){const n=Number(t);if(!/^\d+$/.test(t)||!Number.isInteger(n)||n<1||n>120)return ctx.reply('Введите возраст числом.');value=n;}
       if(edit.field==='height_cm'){const n=positiveNumber(t);if(n===null||n>300)return ctx.reply('Введите рост числом.');value=n;}
       if(edit.field==='weight_kg'){const n=positiveNumber(t);if(n===null||n>500)return ctx.reply('Введите вес числом.');value=n;}
-      if(edit.field.startsWith('telegram_')) return ctx.reply('Данные Telegram-профиля не редактируются вручную.');
+      if(edit.field==='telegram_username'){if(!/^[A-Za-z0-9_]{5,32}$/.test(t.replace(/^@/,'')))return ctx.reply('Введите корректный Telegram username или нажмите «Пропустить».');value=t.replace(/^@/,'');}
       const c=await updateClientField(edit.clientId,edit.field,value);editSessions.delete(uid);if(c)await showClient(ctx,c.id);
     }catch(e){console.error(e);await ctx.reply('Не удалось сохранить изменение.');}
   }
