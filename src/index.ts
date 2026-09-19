@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { Bot, InlineKeyboard } from 'grammy';
 import pg from 'pg';
 import { syncExerciseCatalog } from './exercise-catalog.js';
+import { ANATOMY_CATALOG_VERSION } from './anatomy-exercise-catalog.js';
 import { createAIWorkoutPlan, aiEnabled, type AIPlannerProfile, type AIExerciseCandidate } from './ai-planner.js';
 
 const { Pool } = pg;
@@ -481,6 +482,7 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
             source_url, gif_url, image_url, training_types, movement_pattern, level, training_contexts
      FROM exercise_library
      WHERE ${equipmentFilter}
+       AND id LIKE 'anat-%'
        AND category IN ('upper legs','chest','back','shoulders','waist','lower legs','upper arms','lower arms','cardio')
      LIMIT 1324`
   );
@@ -630,9 +632,16 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
 
     if (baseRows.length) {
       // Rotate the ranked exercise pool with a larger step so weekly sessions are meaningfully different.
-      const rotation = (i * 3) % baseRows.length;
-      const rotated = [...baseRows.slice(rotation), ...baseRows.slice(0, rotation)];
-      dayExercises = rotated.slice(0, Math.min(6, baseRows.length)).map((e) => ({ ...e }));
+      const perDay = Math.min(6, Math.max(4, Math.floor(baseRows.length / daysCount)));
+      const start = i * perDay;
+      const end = Math.min(start + perDay, baseRows.length);
+      const block = baseRows.slice(start, end);
+      // Each day receives its own block of exercises; never rotate the same pool across days.
+      dayExercises = block.map((e) => ({ ...e }));
+      if (dayExercises.length < 4) {
+        const remaining = baseRows.filter((e) => !days.slice(0, i).some((d) => d.exercises.some((x) => x.name === e.name)));
+        dayExercises = [...dayExercises, ...remaining.slice(0, 4 - dayExercises.length).map((e) => ({ ...e }))];
+      }
     } else {
       dayExercises = exercises.map((e) => ({ ...e }));
     }
@@ -1009,41 +1018,34 @@ async function sendProgramMedia(ctx: any, program: Program, replyMarkup?: Inline
     await sendProgramText(ctx, [
       '━━━━━━━━━━━━━━',
       `🏋️ <b>${escapeHtml(day.title)}</b>`,
-      `🎯 Фокус: <b>${escapeHtml(day.focus)}</b>`,
+      `🎯 <b>Фокус:</b> ${escapeHtml(day.focus)}`,
       '',
       '🔥 <b>Разминка</b>',
-      escapeHtml(day.warmup)
+      escapeHtml(day.warmup),
+      '',
+      '💪 <b>Основная часть</b>',
+      '',
+      ...day.exercises.flatMap((exercise, i) => [
+        `<b>${i + 1}. ${escapeHtml(exercise.name)}</b>`,
+        `   📊 ${exercise.sets} × ${escapeHtml(exercise.reps)}   ⏱ ${escapeHtml(exercise.rest)}`,
+        exercise.recommendation ? `   💡 ${escapeHtml(exercise.recommendation)}` : (exercise.comment ? `   💡 ${escapeHtml(exercise.comment)}` : ''),
+        ''
+      ].filter(Boolean)),
+      '🧘 <b>Заминка</b>',
+      escapeHtml(day.cooldown)
     ].join('\\n'));
 
     for (let i = 0; i < day.exercises.length; i++) {
       const exercise = day.exercises[i];
-      const exerciseText = [
-        `<b>${i + 1}. ${escapeHtml(exercise.name)}</b>`,
-        `📊 <b>Подходы:</b> ${exercise.sets} × ${escapeHtml(exercise.reps)}`,
-        exercise.recommendation
-          ? `💡 <b>Рекомендация:</b> ${escapeHtml(exercise.recommendation)}`
-          : exercise.comment
-            ? `💡 <b>Рекомендация:</b> ${escapeHtml(exercise.comment)}`
-            : ''
-      ].filter(Boolean).join('\\n');
-      await sendProgramText(ctx, exerciseText);
-
       const url = resolveGifUrl(exercise.gifUrl);
       if (url) {
         try {
-          await ctx.replyWithAnimation(url);
+          await ctx.replyWithAnimation(url, { caption: `${i + 1}. ${exercise.name}` });
         } catch (error) {
           console.error('exercise gif send failed', { name: exercise.name, url, error });
         }
-      } else {
-        await ctx.reply('⚠️ GIF для этого упражнения отсутствует в базе.');
       }
     }
-
-    await sendProgramText(ctx, [
-      '🧘 <b>Заминка</b>',
-      escapeHtml(day.cooldown)
-    ].join('\\n'));
   }
 
   const notes = [
@@ -1950,6 +1952,7 @@ async function main() {
   await ensureDatabase();
   await seedExerciseLibrary();
   await syncExerciseCatalog(pool);
+  console.log('Using anatomy catalog version:', ANATOMY_CATALOG_VERSION);
   const integrity = await pool.query(`SELECT
     (SELECT COUNT(*) FROM trainer_profiles) AS profiles,
     (SELECT COUNT(*) FROM training_programs) AS programs,
