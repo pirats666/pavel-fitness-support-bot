@@ -25,7 +25,7 @@ export async function createClient(draft: ClientDraft): Promise<Client> {
        age, height_cm, weight_kg, goal, experience, workouts_per_week, training_location, limitations, note)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      RETURNING *`,
-    [draft.telegram_first_name, draft.telegram_last_name].filter(Boolean).join(' ') || 'Telegram user', draft.telegram_user_id, draft.telegram_username, draft.telegram_first_name, draft.telegram_last_name,
+    [(draft.telegram_first_name + (draft.telegram_last_name ? ' ' + draft.telegram_last_name : '')).trim() || 'Telegram user', draft.telegram_user_id, draft.telegram_username, draft.telegram_first_name, draft.telegram_last_name,
      draft.age, draft.height_cm, draft.weight_kg, draft.goal, draft.experience, draft.workouts_per_week,
      draft.training_location, draft.limitations, draft.note]
   );
