@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS public.clients (
   id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
   telegram_user_id BIGINT,
   telegram_username TEXT,
   telegram_first_name TEXT,
@@ -16,5 +17,7 @@ CREATE TABLE IF NOT EXISTS public.clients (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS clients_name_idx ON public.clients (LOWER(telegram_username));
+CREATE INDEX IF NOT EXISTS clients_username_idx ON public.clients (LOWER(telegram_username));
 CREATE INDEX IF NOT EXISTS clients_created_at_idx ON public.clients (created_at DESC);
+
+-- Existing Telegram identity columns are nullable until a future client-linking flow is implemented.
