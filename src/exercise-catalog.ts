@@ -291,7 +291,7 @@ export async function syncExerciseCatalog(pool: Pool) {
         id, nameRu(name), bodyPartRu(category), equipmentRu(equipment), muscleRu(muscleGroup,target),
         JSON.stringify(trainingTypes(name,category,equipment,target,muscleGroup)),
         movement, level(name,target), mediaId,
-        gifUrl, imageUrl, '© Gym visual — https://gymvisual.com/', CATALOG_VERSION,
+        '© Gym visual — https://gymvisual.com/', CATALOG_VERSION,
         JSON.stringify(trainingContexts(name,category,equipment,target,muscleGroup,movement))
       ]
     );
