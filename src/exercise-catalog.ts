@@ -175,7 +175,7 @@ function trainingContexts(name: string, category: string, equipment: string, tar
   return [...contexts];
 }
 
-async function syncAnatomyExerciseCatalog(pool: Pool) {
+export async function syncAnatomyExerciseCatalog(pool: Pool) {
   for (const ex of ANATOMY_EXERCISES) {
     await pool.query(
       `INSERT INTO exercise_library
