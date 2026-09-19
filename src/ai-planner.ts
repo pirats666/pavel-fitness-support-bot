@@ -312,3 +312,5 @@ export async function createAIWorkoutPlan(
 export function aiEnabled() {
   return Boolean(apiKey);
 }
+
+// Outdoor warm-up is a separate block and never part of the main exercise list.
