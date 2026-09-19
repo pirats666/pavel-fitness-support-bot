@@ -219,7 +219,6 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
         JSON.stringify(trainingTypes),
         ex.primaryAction,
         level,
-        '© Gym visual — https://gymvisual.com/',
         ANATOMY_CATALOG_VERSION,
         JSON.stringify([...new Set(contexts)]),
         Boolean(media.gifUrl)
