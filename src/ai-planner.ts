@@ -171,9 +171,9 @@ function buildInstructions(profile: AIPlannerProfile, exercises: AIExerciseCandi
   // Hard separation by training location:
   // gym programs must use gym-resistance modalities, not the same bodyweight pool as outdoor.
   const planningExercises = exercises.filter((e) => {
-    if (profile.location === 'gym') return e.equipmentRu !== 'Собственный вес';
-    if (profile.location === 'home') return e.equipmentRu === 'Собственный вес';
-    if (profile.location === 'outdoor') return e.equipmentRu === 'Собственный вес';
+    if (profile.location === 'gym') return !e.equipmentRu.startsWith('Собственный вес');
+    if (profile.location === 'home') return e.equipmentRu.startsWith('Собственный вес');
+    if (profile.location === 'outdoor') return e.equipmentRu.startsWith('Собственный вес');
     return true;
   });
 
@@ -361,10 +361,10 @@ function validatePlan(plan: AIWorkoutPlan, profile: AIPlannerProfile, catalog: A
       }
 
       const selected = catalog.find((item) => item.id === ex.exerciseId);
-      if (profile.location === 'gym' && selected?.equipmentRu === 'Собственный вес') {
+      if (profile.location === 'gym' && selected?.equipmentRu.startsWith('Собственный вес')) {
         throw new Error('AI selected a bodyweight-only exercise for a gym program');
       }
-      if (profile.location === 'outdoor' && selected?.equipmentRu !== 'Собственный вес') {
+      if (profile.location === 'outdoor' && !selected?.equipmentRu.startsWith('Собственный вес')) {
         throw new Error('AI selected non-bodyweight exercise for an outdoor program');
       }
       if (!Number.isInteger(ex.sets) || ex.sets < 1 || ex.sets > 6) throw new Error('AI returned invalid sets');
