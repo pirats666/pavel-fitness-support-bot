@@ -19,6 +19,7 @@ export type AIExerciseCandidate = {
   movementPattern: string;
   level: string;
   instructionsRu: string;
+  gifUrl?: string;
 };
 
 export type AIPlanExercise = {
@@ -118,6 +119,7 @@ function catalogText(exercises: AIExerciseCandidate[]) {
     'контексты=' + (e.trainingContexts ?? []).join(','),
     'паттерн=' + e.movementPattern,
     'уровень=' + e.level,
+    'gif=' + (e.gifUrl ?? 'нет'),
     'техника=' + e.instructionsRu.slice(0, 500)
   ].join(' | ')).join('\n');
 }
