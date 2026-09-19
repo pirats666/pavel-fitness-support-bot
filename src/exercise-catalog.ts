@@ -177,12 +177,29 @@ function trainingContexts(name: string, category: string, equipment: string, tar
 
 export async function syncAnatomyExerciseCatalog(pool: Pool) {
   for (const ex of ANATOMY_EXERCISES) {
+    const media = await pool.query(
+      `SELECT gif_url, image_url
+       FROM exercise_library
+       WHERE id NOT LIKE 'anat-%'
+         AND gif_url <> ''
+         AND (
+           lower(COALESCE(name_ru, '')) = lower($1)
+           OR lower(COALESCE(name, '')) = lower($1)
+           OR lower(COALESCE(name_ru, '')) LIKE lower($2)
+         )
+       ORDER BY CASE WHEN lower(COALESCE(name_ru, '')) = lower($1) THEN 0 ELSE 1 END, id
+       LIMIT 1`,
+      [ex.name, '%' + ex.name + '%']
+    );
+    const gifUrl = String(media.rows[0]?.gif_url ?? '');
+    const imageUrl = String(media.rows[0]?.image_url ?? '');
+
     await pool.query(
       `INSERT INTO exercise_library
         (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url,
          gif_url,image_url,name_ru,body_part_ru,equipment_ru,muscle_group_ru,training_types,movement_pattern,level,
          catalog_version,training_contexts)
-       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,'','',$2,$9,$10,$11,'["maintenance","strength","hypertrophy"]'::jsonb,$12,'beginner',$13,$14::jsonb)
+       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,$15,$16,$2,$9,$10,$11,'["maintenance","strength","hypertrophy"]'::jsonb,$12,'beginner',$13,$14::jsonb)
        ON CONFLICT (id) DO UPDATE SET
          name=EXCLUDED.name,
          category=EXCLUDED.category,
@@ -205,6 +222,7 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
         'anatomo-training-database',
         ex.muscleGroup, ex.equipmentRu, ex.muscle,
         ex.primaryAction, ANATOMY_CATALOG_VERSION,
+        gifUrl, imageUrl,
         JSON.stringify([
           ex.environment === 'home' ? 'home' : ex.environment === 'outdoor' ? 'outdoor' : 'gym',
           ...(ex.environment === 'outdoor' ? ['functional'] : [])
