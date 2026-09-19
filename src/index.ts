@@ -495,12 +495,12 @@ function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desired
 
 async function getLibraryExercises(profile: ProfileForProgram, version: number, fullCatalog = false): Promise<LibraryExercise[]> {
   const equipmentFilter = profile.location === 'gym'
-    ? `equipment <> 'body weight' AND id LIKE 'base-gym-%'`
+    ? `equipment <> 'body weight'`
     : profile.location === 'home'
-      ? `equipment = 'body weight' AND id LIKE 'base-home-%'`
+      ? `equipment = 'body weight'`
       : profile.location === 'outdoor'
-        ? `equipment = 'body weight' AND id LIKE 'base-outdoor-%'`
-        : `id LIKE 'base-%'`;
+        ? `equipment = 'body weight'`
+        : `TRUE`;
 
   const { rows } = await pool.query(
     `SELECT id, name, COALESCE(name_ru,'') AS name_ru, category, COALESCE(body_part_ru,'') AS body_part_ru,
@@ -540,7 +540,7 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number, 
     ? profile.training_focus
     : deriveTrainingFocus(profile);
 
-  // Build a genuinely diverse planning pool: every major body region must be represented.
+  // The full catalog is returned when fullCatalog=true; the program builder applies the day-specific filters.
   // The previous selector could fill the pool with a few dominant categories, which made
   // gym and outdoor programs converge on the same small set of movements.
   const categoryPlan = ['upper legs','chest','back','shoulders','upper arms','lower arms','waist','lower legs'];
@@ -653,15 +653,19 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
   if (!library.length) throw new Error('No training-base exercises available for this location');
 
   const beginner = normalizedProfile.experience === 'beginner' || normalizedProfile.experience === 'under1';
+  const normalize = (v: unknown) => normalizeText(String(v ?? ''));
   const uniqueByName = (rows: LibraryExercise[]) => {
     const seen = new Set<string>();
     return rows.filter((row) => {
-      const key = normalizeText(row.nameRu || row.name);
+      const key = normalize(row.nameRu || row.name);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
   };
+
+  // The full catalog is the source. The day structure is the constraint.
+  // AI is not allowed to move an exercise into a different muscle group/day.
   const candidates = uniqueByName(library)
     .filter((row) => !beginner || row.level !== 'advanced')
     .filter((row) => isExerciseAllowed(row, normalizedProfile.limitations ?? ''));
@@ -669,16 +673,21 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
   const used = new Set<string>();
   const usedNames = new Set<string>();
 
-  const take = (count: number, filter: (row: LibraryExercise) => boolean, preferred?: (row: LibraryExercise) => number, allowUsed = false) => {
+  const take = (
+    count: number,
+    filter: (row: LibraryExercise) => boolean,
+    preferred?: (row: LibraryExercise) => number
+  ) => {
     const pool = candidates
-      .filter((row) => allowUsed || (!used.has(row.id) && !usedNames.has(normalizeText(row.nameRu || row.name))))
+      .filter((row) => !used.has(row.id) && !usedNames.has(normalize(row.nameRu || row.name)))
       .filter(filter)
-      .sort((a,b) => (preferred ? preferred(b) - preferred(a) : 0));
+      .sort((a, b) => (preferred ? preferred(b) - preferred(a) : 0));
+
     const result: LibraryExercise[] = [];
     for (const row of pool) {
       result.push(row);
       used.add(row.id);
-      usedNames.add(normalizeText(row.nameRu || row.name));
+      usedNames.add(normalize(row.nameRu || row.name));
       if (result.length >= count) break;
     }
     return result;
@@ -686,33 +695,43 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
 
   const priority = (row: LibraryExercise) => {
     let score = 0;
-    const text = normalizeText(row.nameRu || row.name);
-    if (/присед|жим|тяга|подтяг|отжим|румын|hip thrust|ягодичный мост|выпад/.test(text)) score += 20;
-    if (row.movementPattern && /присед|жим|тяга|сгибание|разгибание|анти|ротац|стабилиз/.test(normalizeText(row.movementPattern))) score += 8;
-    if (row.gifUrl) score += 2;
+    const text = normalize(row.nameRu || row.name);
+    const movement = normalize(row.movementPattern);
+    if (/присед|жим|тяга|подтяг|отжим|румын|hip thrust|ягодичный мост|выпад|squat|press|row|pull|deadlift/.test(text)) score += 20;
+    if (/присед|жим|тяга|сгибание|разгибание|анти|ротац|стабилиз|squat|press|pull|push|hinge|carry/.test(movement)) score += 8;
+    if (row.gifUrl) score += 3;
     if (row.level === 'beginner') score += beginner ? 8 : 2;
     if (normalizedProfile.goal === 'mass' && row.trainingTypes.includes('hypertrophy')) score += 8;
     if (normalizedProfile.goal === 'loss' && row.trainingTypes.includes('endurance')) score += 5;
     return score;
   };
 
+  const targetText = (row: LibraryExercise) =>
+    normalize(`${row.target} ${row.muscleGroupRu} ${row.muscleGroup} ${row.bodyPartRu} ${row.nameRu} ${row.name}`);
+
+  const byGroup = (group: string) => (row: LibraryExercise) =>
+    normalize(row.muscleGroupRu) === normalize(group) || normalize(row.bodyPartRu) === normalize(group);
+
+  const byTarget = (group: string, target: RegExp) => (row: LibraryExercise) =>
+    (normalize(row.muscleGroupRu) === normalize(group) || normalize(row.bodyPartRu) === normalize(group)) &&
+    target.test(targetText(row));
+
   const toExercise = (row: LibraryExercise, index: number): Exercise => exercisePrescription(row, normalizedProfile, index);
 
-  const mainCount = duration <= 45 ? 5 : 6;
   const makeDay = (day: number, title: string, focus: string, rows: LibraryExercise[]) => ({
     day,
     title,
     focus,
     warmup: duration <= 45
-      ? '5–7 минут: общая активизация + динамическая разминка суставов и движений дня.'
-      : '8–10 минут: общая активизация + динамическая разминка суставов и движений дня.',
+      ? '5–7 минут: общая активизация + динамическая разминка движений дня.'
+      : '8–10 минут: общая активизация + динамическая разминка движений дня.',
     exercises: rows.map((row, i) => toExercise(row, i)),
-    cooldown: '5–7 минут: спокойное восстановление и лёгкая мобильность без силовой работы.'
+    cooldown: '5–7 минут: спокойное восстановление и лёгкая мобильность.'
   });
 
   const days: WorkoutDay[] = [];
 
-  if (frequency === 1 || frequency === 2) {
+  if (frequency <= 2) {
     const patterns = [
       ['Грудь','Спина','Ноги','Плечи','Руки','Кор'],
       ['Ноги','Спина','Грудь','Плечи','Руки','Голень','Кор']
@@ -720,63 +739,76 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     for (let d = 0; d < frequency; d++) {
       const rows: LibraryExercise[] = [];
       for (const group of patterns[d]) {
-        rows.push(...take(1, (r) => r.bodyPartRu === group || r.muscleGroupRu === group, priority));
-        if (rows.length >= mainCount) break;
+        rows.push(...take(1, byGroup(group), priority));
       }
-      days.push(makeDay(d + 1, `День ${d + 1} — Full Body${frequency === 2 ? (d === 0 ? ' A' : ' B') : ''}`, 'Full Body', rows.slice(0, mainCount)));
+      days.push(makeDay(d + 1, `День ${d + 1} — Full Body${frequency === 2 ? (d === 0 ? ' A' : ' B') : ''}`, 'Full Body', rows.slice(0, duration <= 45 ? 6 : 7)));
     }
   } else {
-    const chest = take(normalizedProfile.location === 'outdoor' ? 1 : 3, (r) => r.category === 'chest', priority);
-    const arms = take(normalizedProfile.location === 'outdoor' ? 2 : 3, (r) => r.category === 'upper arms', priority);
-    let day1Rows = [...chest, ...arms];
-    if (day1Rows.length < 4) {
-      day1Rows.push(...take(4 - day1Rows.length, (r) => ['shoulders','back'].includes(r.category), priority));
+    // DAY 1: CHEST + ARMS
+    // Target structure requested by Pavel:
+    // chest 4, biceps 2, triceps 2 = 8 exercises.
+    const day1Chest = take(4, byGroup('Грудь'), priority);
+    const day1Biceps = take(2, byTarget('Руки', /бицепс|biceps|brachialis|плечевая/), priority);
+    const day1Triceps = take(2, byTarget('Руки', /трицепс|triceps/), priority);
+    const day1Rows = [...day1Chest, ...day1Biceps, ...day1Triceps];
+    if (day1Rows.length < 8) {
+      day1Rows.push(...take(8 - day1Rows.length, (r) => byGroup('Руки')(r), priority));
     }
-    days.push(makeDay(1, 'День 1 — Грудь + руки', 'Грудь + руки', day1Rows.slice(0, mainCount)));
+    days.push(makeDay(1, 'День 1 — Грудь + руки', 'Грудь + руки', day1Rows.slice(0, 8)));
 
-    const back = take(normalizedProfile.location === 'outdoor' ? 3 : 3, (r) => r.category === 'back', priority);
-    const shoulders = take(normalizedProfile.location === 'outdoor' ? 1 : 3, (r) => r.category === 'shoulders', priority);
-    let day2Rows = [...back, ...shoulders];
-    if (day2Rows.length < 4) {
-      day2Rows.push(...take(4 - day2Rows.length, (r) => ['back','shoulders'].includes(r.category), priority, normalizedProfile.location === 'outdoor'));
+    // DAY 2: BACK + SHOULDERS
+    // 5 back + 3 shoulders = 8, selected across the whole catalog.
+    const day2Back = take(5, byGroup('Спина'), priority);
+    const day2Shoulders = take(3, byGroup('Плечи'), priority);
+    const day2Rows = [...day2Back, ...day2Shoulders];
+    if (day2Rows.length < 8) {
+      day2Rows.push(...take(8 - day2Rows.length, (r) => byGroup('Плечевой пояс')(r), priority));
     }
-    days.push(makeDay(2, 'День 2 — Спина + плечи', 'Спина + плечи', day2Rows.slice(0, mainCount)));
+    days.push(makeDay(2, 'День 2 — Спина + плечи', 'Спина + плечи', day2Rows.slice(0, 8)));
 
-    const legTargets = [
-      /квадриц/i, /ягод/i, /задн.*бедр/i, /привод/i, /голен|икрон|камбал/i
-    ];
-    const legRows: LibraryExercise[] = [];
-    for (const target of legTargets) {
-      legRows.push(...take(1, (r) => r.category === 'upper legs' || r.category === 'lower legs'
-        ? target.test(normalizeText(r.muscleGroupRu + ' ' + r.target + ' ' + r.nameRu))
-        : false, priority));
+    // DAY 3: LEGS
+    // Cover the major lower-body functions instead of dumping random leg exercises.
+    const day3Quads = take(2, byTarget('Ноги', /квадрицепс|quadriceps|quad/), priority);
+    const day3Glutes = take(2, byTarget('Ноги', /ягодич|glute/), priority);
+    const day3Hamstrings = take(2, byTarget('Ноги', /задняя поверхность бедра|hamstring|biceps femoris|semitendinosus|semimembranosus/), priority);
+    const day3Adductors = take(1, byTarget('Ноги', /приводящ|adductor/), priority);
+    const day3Calves = take(1, (r) => byGroup('Голень')(r), priority);
+    const day3Rows = [...day3Quads, ...day3Glutes, ...day3Hamstrings, ...day3Adductors, ...day3Calves];
+    if (day3Rows.length < 8) {
+      day3Rows.push(...take(8 - day3Rows.length, (r) => byGroup('Ноги')(r), priority));
     }
-    legRows.push(...take(Math.max(0, mainCount - legRows.length), (r) => ['upper legs','lower legs'].includes(r.category), priority));
-    days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', legRows.slice(0, mainCount)));
+    days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', day3Rows.slice(0, 8)));
 
+    // DAY 4: FUNCTIONAL + STRETCHING
+    // Functional work is selected by movement patterns, not by a muscle split.
     if (frequency >= 4) {
       const functionalPatterns = [
-        /присед|разгибание колена|выпад/,
-        /разгибание бедра|сгибание колена|тяга/,
-        /жим|горизонтальное приведение/,
-        /горизонтальная тяга|вертикальная тяга/,
-        /антиразгибание|анти-ротация|ротация|контроль корпуса/,
-        /протракция|стабилизация|отведение/
+        /присед|squat/,
+        /hinge|разгибание бедра|сгибание колена|deadlift|румын/,
+        /жим|push|press|горизонтальное приведение/,
+        /тяга|pull|row|вертикальная тяга|горизонтальная тяга/,
+        /антиразгибание|anti-extension|анти-ротация|anti-rotation|ротац|rotation|core|кор/,
+        /переноск|carry|стабилиз|stabil|координац|balance/
       ];
       const functionalRows: LibraryExercise[] = [];
       for (const pattern of functionalPatterns) {
-        const got = take(1, (r) => pattern.test(normalizeText(r.movementPattern + ' ' + r.nameRu)), priority);
+        const got = take(1, (r) => pattern.test(normalize(`${r.movementPattern} ${r.nameRu} ${r.name} ${r.target}`)), priority);
         if (got[0]) functionalRows.push(got[0]);
       }
-      if (functionalRows.length < 5) {
-        functionalRows.push(...take(5 - functionalRows.length, (r) => ['waist','upper legs','back','chest','shoulders'].includes(r.category), priority, normalizedProfile.location === 'outdoor'));
+      if (functionalRows.length < 6) {
+        functionalRows.push(...take(6 - functionalRows.length, (r) =>
+          ['waist','upper legs','back','chest','shoulders'].includes(r.category), priority));
       }
-      days.push(makeDay(4, 'День 4 — Функционал + растяжка', 'Функционал + растяжка', functionalRows.slice(0, Math.max(5, Math.min(6, mainCount)))));
+      days.push(makeDay(4, 'День 4 — Функционал + растяжка', 'Функционал + растяжка', functionalRows.slice(0, 6)));
     }
 
     if (frequency >= 5) {
-      const extra = take(Math.max(4, Math.min(6, mainCount)), (r) => ['chest','back','shoulders','upper arms','waist'].includes(r.category), priority);
-      days.push(makeDay(5, 'День 5 — Дополнительная тренировка', 'Дополнительный сплит', extra));
+      const day5Rows = [
+        ...take(3, byGroup('Грудь'), priority),
+        ...take(3, byGroup('Спина'), priority),
+        ...take(2, byGroup('Плечи'), priority)
+      ];
+      days.push(makeDay(5, 'День 5 — Верх тела', 'Верх тела', day5Rows.slice(0, 8)));
     }
   }
 
@@ -792,10 +824,10 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     progression: '4 недели: сохраняй технику, постепенно увеличивай повторения до верхней границы диапазона; после стабильного выполнения повышай сопротивление небольшим шагом.',
     days,
     notes: [
-      `Источник упражнений: анатомо-тренировочная база, 120 упражнений, разделённых по мышцам и месту тренировок.`,
-      `Формат: ${format}. День 1 — грудь + руки; День 2 — спина + плечи; День 3 — ноги; День 4 — функционал + растяжка.`,
+      'Источник упражнений: полный каталог exercise_library; подбор ограничен структурой дня, мышечной группой, локацией и доступным оборудованием.',
+      `Формат: ${format}. День 1 — грудь + руки (4 грудь + 2 бицепс + 2 трицепс); День 2 — спина + плечи; День 3 — ноги; День 4 — функционал + растяжка.`,
       'Разминка и заминка отделены от основной тренировки.',
-      'Внутри программы одно и то же упражнение не повторяется.',
+      'Внутри одной программы одно и то же упражнение не повторяется.',
       normalizedProfile.limitations ? `Ограничения из анкеты: ${normalizedProfile.limitations}.` : 'Ограничений в анкете не указано.',
       correction ? `Учтена коррекция: ${correction}` : 'Программа сформирована по исходной анкете.'
     ]
