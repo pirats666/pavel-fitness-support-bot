@@ -247,7 +247,7 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
         (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url,
          gif_url,image_url,name_ru,body_part_ru,equipment_ru,muscle_group_ru,training_types,movement_pattern,level,
          catalog_version,training_contexts)
-       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,$15,$16,$2,$9,$10,$11,'["maintenance","strength","hypertrophy"]'::jsonb,$12,'beginner',$13,$14::jsonb)
+       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,$14,$15,$2,$9,$10,$11,'["maintenance","strength","hypertrophy"]'::jsonb,$12,'beginner',$13,$16::jsonb)
        ON CONFLICT (id) DO UPDATE SET
          name=EXCLUDED.name,
          category=EXCLUDED.category,
