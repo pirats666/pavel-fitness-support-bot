@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createServer } from 'node:http';
 import { Bot, InlineKeyboard } from 'grammy';
 import pg from 'pg';
+import { syncExerciseCatalog } from './exercise-catalog.js';
 
 const { Pool } = pg;
 
@@ -409,117 +410,121 @@ function isExerciseAllowed(row: LibraryExercise, limitations: string) {
 
 function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desiredCategory: string, usedIds: Set<string>) {
   let score = 0;
-  const text = normalizeText(`${row.name} ${row.target} ${row.muscleGroup} ${row.equipment}`);
+  const text = normalizeText(`${row.name} ${row.nameRu} ${row.target} ${row.muscleGroup} ${row.equipment}`);
   const difficulty = exerciseDifficulty(row);
+  const focus = profile.training_focus && profile.training_focus !== 'auto'
+    ? profile.training_focus
+    : deriveTrainingFocus(profile);
 
-  // 1) The exercise must match the requested movement/muscle category.
-  if (row.category === desiredCategory) score += 30;
+  if (row.category === desiredCategory) score += 25;
+  if (row.trainingTypes.includes(focus)) score += 35;
+  if (focus === 'hypertrophy' && row.trainingTypes.includes('hypertrophy')) score += 10;
+  if (focus === 'strength' && row.trainingTypes.includes('strength')) score += 10;
+  if (focus === 'endurance' && row.trainingTypes.includes('endurance')) score += 10;
+  if (focus === 'recovery' && row.trainingTypes.includes('recovery')) score += 15;
+  if (focus === 'mobility' && row.trainingTypes.includes('mobility')) score += 15;
+  if (focus === 'power' && row.trainingTypes.includes('power')) score += 15;
+  if (focus === 'conditioning' && row.trainingTypes.includes('conditioning')) score += 15;
 
-  // 2) Goal changes the priority of exercise types and volume later.
-  if (profile.goal === 'mass') {
-    if (/(chest|pector|back|lat|dorsi|quadr|hamstring|glute|deltoid|shoulder)/.test(text)) score += 8;
-    if (/(isolation|curl|extension|raise|fly)/.test(text)) score += 2;
-  } else if (profile.goal === 'loss') {
-    if (/(squat|lunge|row|push|press|pull|deadlift|carry)/.test(text)) score += 6;
-    if (/(body weight|bodyweight)/.test(text)) score += 3;
-  } else {
-    if (/(squat|lunge|row|push|press|pull|hinge|deadlift|core|abs)/.test(text)) score += 7;
-  }
+  if (profile.goal === 'mass' && /(chest|pector|back|lat|dorsi|quadr|hamstring|glute|deltoid|shoulder)/.test(text)) score += 8;
+  if (profile.goal === 'loss' && /(squat|lunge|row|push|press|pull|deadlift|carry|cardio)/.test(text)) score += 7;
+  if (profile.goal === 'health' && /(squat|lunge|row|push|press|pull|hinge|core|balance|mobility)/.test(text)) score += 7;
 
-  // 3) Experience controls complexity: beginners get simpler patterns first.
   if (profile.experience === 'beginner' || profile.experience === 'under1') {
-    score += difficulty === 1 ? 8 : difficulty === 2 ? 2 : -10;
+    score += difficulty === 1 ? 10 : difficulty === 2 ? 3 : -12;
   } else if (profile.experience === '1to3') {
-    score += difficulty <= 2 ? 5 : 1;
+    score += difficulty <= 2 ? 6 : 1;
   } else {
-    score += difficulty >= 2 ? 5 : 2;
+    score += difficulty >= 2 ? 6 : 2;
   }
 
-  // 4) Match available training environment.
-  const gym = profile.location === 'gym' || (profile.location === 'mixed');
+  const gym = profile.location === 'gym' || profile.location === 'mixed';
   if (gym && !/(body weight|bodyweight)/.test(text)) score += 4;
-  if (!gym && /(body weight|bodyweight)/.test(text)) score += 8;
-
-  // 5) Avoid repeating the same exercise across the program where alternatives exist.
-  if (usedIds.has(row.id)) score -= 18;
-
-  // 6) Very short sessions favor simpler choices; longer sessions can tolerate more variety.
-  if (profile.workout_duration <= 45 && difficulty === 3) score -= 5;
-  if (profile.workout_duration >= 75 && difficulty >= 2) score += 2;
+  if (!gym && /(body weight|bodyweight)/.test(text)) score += 10;
+  if (usedIds.has(row.id)) score -= 25;
+  if (profile.workout_duration <= 45 && difficulty === 3) score -= 7;
+  if (!row.gifUrl) score -= 8;
+  if (!row.nameRu || row.nameRu === 'Функциональное упражнение') score -= 3;
 
   return score;
 }
 
 async function getLibraryExercises(profile: ProfileForProgram, version: number): Promise<LibraryExercise[]> {
-  const gym = profile.location === 'gym' || (profile.location === 'mixed' && version % 2 === 1);
-  const equipmentFilter = gym
-    ? `equipment NOT IN ('body weight','band','resistance band')`
+  const equipmentFilter = profile.location === 'gym' || profile.location === 'mixed'
+    ? `equipment NOT IN ('band','resistance band')`
     : `equipment = 'body weight'`;
 
   const { rows } = await pool.query(
-    `SELECT id, name, category, equipment, target, muscle_group, secondary_muscles, instructions_ru, source_url, gif_url, image_url
+    `SELECT id, name, COALESCE(name_ru,'') AS name_ru, category, COALESCE(body_part_ru,'') AS body_part_ru,
+            equipment, COALESCE(equipment_ru,'') AS equipment_ru, target, muscle_group,
+            COALESCE(muscle_group_ru,'') AS muscle_group_ru, secondary_muscles, instructions_ru,
+            source_url, gif_url, image_url, training_types, movement_pattern, level
      FROM exercise_library
      WHERE ${equipmentFilter}
-       AND category IN ('upper legs','chest','back','shoulders','waist','lower legs')
-     LIMIT 200`
+       AND category IN ('upper legs','chest','back','shoulders','waist','lower legs','upper arms','lower arms','cardio')
+     LIMIT 800`
   );
 
   const candidates: LibraryExercise[] = rows.map((row: any) => ({
     id: String(row.id),
     name: String(row.name ?? ''),
+    nameRu: String(row.name_ru ?? ''),
     category: String(row.category ?? ''),
+    bodyPartRu: String(row.body_part_ru ?? ''),
     equipment: String(row.equipment ?? ''),
+    equipmentRu: String(row.equipment_ru ?? ''),
     target: String(row.target ?? ''),
     muscleGroup: String(row.muscle_group ?? ''),
+    muscleGroupRu: String(row.muscle_group_ru ?? ''),
     secondaryMuscles: Array.isArray(row.secondary_muscles) ? row.secondary_muscles : [],
     instructionsRu: String(row.instructions_ru ?? ''),
     sourceUrl: String(row.source_url ?? ''),
     gifUrl: String(row.gif_url ?? ''),
-    imageUrl: String(row.image_url ?? '')
+    imageUrl: String(row.image_url ?? ''),
+    trainingTypes: Array.isArray(row.training_types) ? row.training_types.map(String) : ['maintenance'],
+    movementPattern: String(row.movement_pattern ?? ''),
+    level: String(row.level ?? 'beginner')
   }));
 
-  const allowedCandidates = candidates.filter((row) => isExerciseAllowed(row, profile.limitations ?? ''));
+  const allowed = candidates.filter((row) => isExerciseAllowed(row, profile.limitations ?? ''));
+  const focus = profile.training_focus && profile.training_focus !== 'auto'
+    ? profile.training_focus
+    : deriveTrainingFocus(profile);
 
-  // A program is built from movement/muscle categories, not from the first DB rows.
-  // Each category is ranked against the questionnaire, then different exercises are rotated by day.
-  const categories = ['upper legs', 'chest', 'back', 'shoulders', 'waist'];
-  if (profile.goal !== 'mass' && profile.workout_duration >= 45) categories.push('lower legs');
+  const categoryPlan = profile.workouts_per_week <= 1
+    ? ['upper legs','chest','back','shoulders','waist']
+    : profile.workouts_per_week === 2
+      ? ['upper legs','back','chest','shoulders','waist']
+      : ['upper legs','back','chest','shoulders','waist','lower legs'];
 
   const selected: LibraryExercise[] = [];
   const used = new Set<string>();
 
-  for (let i = 0; i < Math.min(categories.length, 6); i++) {
-    const category = categories[(i + (version - 1)) % categories.length];
-    const ranked = allowedCandidates
+  for (const category of categoryPlan) {
+    const ranked = allowed
       .filter((row) => row.category === category)
       .map((row) => ({ ...row, score: scoreExercise(row, profile, category, used) }))
       .sort((a, b) => b.score - a.score);
-
-    const best = ranked[0];
+    const best = ranked.find((row) => !used.has(row.id));
     if (best) {
       selected.push(best);
       used.add(best.id);
     }
   }
 
-  // If the dataset has sparse categories, fill from the highest scoring unused exercises.
-  if (selected.length < 10) {
-    const ranked = allowedCandidates
-      .filter((row) => !used.has(row.id))
-      .map((row) => ({
-        ...row,
-        score: scoreExercise(row, profile, row.category, used)
-      }))
-      .sort((a, b) => b.score - a.score);
+  const focusRanked = allowed
+    .filter((row) => !used.has(row.id))
+    .map((row) => ({ ...row, score: scoreExercise(row, profile, row.category, used) }))
+    .sort((a, b) => b.score - a.score);
 
-    for (const row of ranked) {
-      if (selected.length >= 10) break;
-      selected.push(row);
-      used.add(row.id);
-    }
+  for (const row of focusRanked) {
+    if (selected.length >= 12) break;
+    selected.push(row);
+    used.add(row.id);
   }
 
-  return selected.slice(0, 10);
+  console.log('Program exercise pool:', { focus, selected: selected.length });
+  return selected.slice(0, 12);
 }
 
 function exercisePrescription(row: LibraryExercise, profile: ProfileForProgram, index: number): Exercise {
