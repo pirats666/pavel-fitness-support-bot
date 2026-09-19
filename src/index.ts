@@ -1263,6 +1263,13 @@ async function showCorrectionDays(ctx: any, programId: number) {
   await ctx.reply('🔧 <b>Коррекция программы</b>\n\nВыбери день:', {parse_mode:'HTML',reply_markup:kb});
 }
 
+type PendingCorrection = {
+  programId: number;
+  day: number;
+  selections: Record<string, string>;
+};
+const pendingCorrections = new Map<number, PendingCorrection>();
+
 async function showCorrectionGroups(ctx: any, programId: number, dayNumber: number) {
   const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
   if (!rows[0]) return ctx.reply('Программа не найдена.');
