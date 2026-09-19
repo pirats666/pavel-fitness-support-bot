@@ -2179,14 +2179,17 @@ bot.callbackQuery(/^program:correct:pick:(\d+):(\d+):(\d+)$/, async (ctx) => {
   if (!current) return ctx.answerCallbackQuery({ text: 'Программа не найдена.' });
 
   const exRow = await pool.query(
-    `SELECT id, name, COALESCE(name_ru,'') AS name_ru, gif_url
-     FROM exercise_library WHERE id=$1 AND id LIKE 'anat-%'`,
+    `SELECT id, name, COALESCE(name_ru,'') AS name_ru, COALESCE(movement_pattern,'') AS movement_pattern, gif_url
+     FROM exercise_library WHERE id=$1 AND id LIKE 'base-%'`,
     [exerciseId]
   );
   const selectedExercise = exRow.rows[0];
   if (!selectedExercise) return ctx.answerCallbackQuery({ text: 'Упражнение не найдено.' });
 
   const replacement: Exercise = {
+    id: String(selectedExercise.id),
+    muscleGroup: group,
+    movementPattern: String(selectedExercise.movement_pattern ?? ''),
     name: String(selectedExercise.name_ru || ruExerciseName(selectedExercise.name)),
     gifUrl: String(selectedExercise.gif_url || ''),
     sets: 3,
