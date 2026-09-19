@@ -226,6 +226,7 @@ async function ensureDatabase() {
     ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS media_id TEXT NOT NULL DEFAULT '';
     ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS attribution TEXT NOT NULL DEFAULT '';
     ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS catalog_version TEXT NOT NULL DEFAULT '';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS gif_verified BOOLEAN NOT NULL DEFAULT FALSE;
 
     CREATE TABLE IF NOT EXISTS bot_settings (
       key TEXT PRIMARY KEY,
@@ -469,11 +470,13 @@ function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desired
 }
 
 async function getLibraryExercises(profile: ProfileForProgram, version: number, fullCatalog = false): Promise<LibraryExercise[]> {
-  const equipmentFilter = profile.location === 'gym' || profile.location === 'mixed'
-    ? `equipment <> ''`
-    : profile.location === 'outdoor'
-      ? `equipment = 'body weight' AND COALESCE(equipment_ru, '') LIKE 'Собственный вес%'`
-      : `equipment = 'body weight'`;
+  const equipmentFilter = profile.location === 'gym'
+    ? `equipment <> 'body weight' AND id LIKE 'anat-gym-%'`
+    : profile.location === 'home'
+      ? `equipment = 'body weight' AND id LIKE 'anat-home-%'`
+      : profile.location === 'outdoor'
+        ? `equipment = 'body weight' AND id LIKE 'anat-outdoor-%'`
+        : `id LIKE 'anat-%'`;
 
   const { rows } = await pool.query(
     `SELECT id, name, COALESCE(name_ru,'') AS name_ru, category, COALESCE(body_part_ru,'') AS body_part_ru,
@@ -483,6 +486,8 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number, 
      FROM exercise_library
      WHERE ${equipmentFilter}
        AND id LIKE 'anat-%'
+       AND gif_url <> ''
+       AND gif_verified = TRUE
        AND category IN ('upper legs','chest','back','shoulders','waist','lower legs','upper arms','lower arms','cardio')
      LIMIT 1324`
   );
@@ -620,9 +625,11 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
   const frequency = Math.min(Math.max(normalizedProfile.workouts_per_week, 1), 5);
   const duration = normalizedProfile.workout_duration;
   const libraryExercises = await getLibraryExercises(normalizedProfile, version);
-  const fallback = buildExercises(normalizedProfile.location, normalizedProfile.goal, version);
+  if (!libraryExercises.length) {
+    throw new Error('No verified anatomy exercises available for this location');
+  }
   const baseRows = libraryExercises.map((row, i) => exercisePrescription(row, normalizedProfile, i));
-  const poolRows = baseRows.length ? baseRows : fallback;
+  const poolRows = baseRows;
 
   const isMass = normalizedProfile.goal === 'mass';
   const beginner = normalizedProfile.experience === 'beginner';
