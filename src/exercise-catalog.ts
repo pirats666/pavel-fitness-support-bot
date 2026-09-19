@@ -181,8 +181,8 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
   // The workbook is the source of truth for the program generator.
   // Remove the previous generated anatomy catalog so stale exercises cannot leak
   // into new programs or correction choices.
-  await pool.query(`UPDATE exercise_library SET gif_url='', image_url=''`);
-  await pool.query(`DELETE FROM exercise_library WHERE id LIKE 'anat-%' OR id LIKE 'base-%'`);
+  await pool.query(`DELETE FROM exercise_library WHERE id NOT LIKE 'base-%'`);
+  await pool.query(`UPDATE exercise_library SET gif_url='', image_url='', gif_verified=FALSE`);
 
   for (const ex of ANATOMY_EXERCISES) {
     const media = mediaForExercise(ex);
