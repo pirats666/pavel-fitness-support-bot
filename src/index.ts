@@ -1158,19 +1158,49 @@ function programText(program: Program) {
 
 function exerciseMuscleGroup(name: string, focus = '') {
   const text = normalizeText(name);
-  if (/(груд|жим.*леж|жим.*наклон|отжим|кроссовер|сведен)/.test(text)) return 'Грудь';
-  if (/(широч|спин|тяга|подтяг|пуловер|ромб|трапец)/.test(text)) return 'Спина';
-  if (/(плеч|дельт|разведен.*сторон|жим.*голов|задн.*дельт)/.test(text)) return 'Плечи';
-  if (/(бицеп|сгибан.*рук|молот)/.test(text)) return 'Бицепс';
-  if (/(трицеп|разгибан.*рук|француз)/.test(text)) return 'Трицепс';
-  if (/(квадриц|присед|выпад|жим ног|разгибан.*ног|зашаг|step)/.test(text)) return 'Квадрицепс';
-  if (/(ягод|hip thrust|мост|отведен.*бедр)/.test(text)) return 'Ягодицы';
-  if (/(бицепс бедр|задн.*поверх.*бедр|румын|сгибан.*ног)/.test(text)) return 'Задняя поверхность бедра';
-  if (/(икр|голен|носк)/.test(text)) return 'Икры';
-  if (/(пресс|живот|скручив|планк|dead bug|кор)/.test(text)) return 'Кор';
-  if (focus && /ног/.test(normalizeText(focus))) return 'Ноги';
-  if (focus && /груд/.test(normalizeText(focus))) return 'Грудь';
-  if (focus && /спин/.test(normalizeText(focus))) return 'Спина';
+  const focusText = normalizeText(focus);
+
+  // UI-level groups intentionally differ from the detailed anatomy taxonomy:
+  // Бицепс + трицепс + плечевая мышца = Руки.
+  // Квадрицепс + задняя поверхность бедра + ягодицы + икры + приводящие = Ноги.
+  if (/(груд|жим.*леж|жим.*наклон|отжим|кроссовер|сведен.*груд|pec deck|chest fly)/.test(text)) {
+    return 'Грудь';
+  }
+
+  if (/(широч|спин|подтяг|пуловер|ромб|трапец|тяга.*верхн|тяга.*гориз|тяга.*пояс|тяга.*гантел|тяга.*штанг)/.test(text)) {
+    return 'Спина';
+  }
+
+  if (/(плеч|дельт|разведен.*сторон|жим.*над.*голов|жим.*плеч|задн.*дельт|мах.*сторон)/.test(text)) {
+    return 'Плечи';
+  }
+
+  // All arm musculature is one correction group.
+  if (/(бицеп|трицеп|плечев.*мышц|сгибан.*рук|разгибан.*рук|молот|hammer curl|curl|triceps|француз)/.test(text)) {
+    return 'Руки';
+  }
+
+  // All lower-body musculature is one correction group.
+  if (/(квадриц|присед|выпад|жим ног|разгибан.*ног|сгибан.*ног|зашаг|step[- ]?up|ягод|hip thrust|glute bridge|отведен.*бедр|румын|станов|good morning|бицепс бедр|задн.*поверх.*бедр|икр|голен|носк|приводящ)/.test(text)) {
+    return 'Ноги';
+  }
+
+  if (/(пресс|живот|скручив|планк|dead bug|dead bug|кор|pallof|anti[- ]rotation|rotation|подъем.*ног)/.test(text)) {
+    return 'Кор';
+  }
+
+  if (/(зубчат|лопат|вращательн.*манжет|манжет.*плеч)/.test(text)) {
+    return 'Плечевой пояс';
+  }
+
+  // If the exercise name is generic, use the day focus only as a last resort.
+  if (focusText.includes('груд')) return 'Грудь';
+  if (focusText.includes('спин')) return 'Спина';
+  if (focusText.includes('плеч')) return 'Плечи';
+  if (focusText.includes('рук')) return 'Руки';
+  if (focusText.includes('ног')) return 'Ноги';
+  if (focusText.includes('кор')) return 'Кор';
+
   return 'Другое';
 }
 
