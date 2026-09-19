@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { ANATOMY_EXERCISES, ANATOMY_CATALOG_VERSION } from './anatomy-exercise-catalog.js';
 
 const CATALOG_VERSION = '2026-09-r3';
 const SOURCE_JSON = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/data/exercises.json';
@@ -172,6 +173,51 @@ function trainingContexts(name: string, category: string, equipment: string, tar
   if (bodyweight && /pull-up|pull up|chin-up|dip|bar|hanging|подтяг|брусь/.test(text)) contexts.add('outdoor');
   if (bodyweight && fullBody) contexts.add('outdoor');
   return [...contexts];
+}
+
+async function syncAnatomyExerciseCatalog(pool: Pool) {
+  for (const ex of ANATOMY_EXERCISES) {
+    await pool.query(
+      `INSERT INTO exercise_library
+        (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url,
+         gif_url,image_url,name_ru,body_part_ru,equipment_ru,muscle_group_ru,training_types,movement_pattern,level,
+         catalog_version,training_contexts)
+       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,'','',$2,$9,$10,$11,'["maintenance","strength","hypertrophy"]'::jsonb,$12,'beginner',$13,$14::jsonb)
+       ON CONFLICT (id) DO UPDATE SET
+         name=EXCLUDED.name,
+         category=EXCLUDED.category,
+         equipment=EXCLUDED.equipment,
+         target=EXCLUDED.target,
+         muscle_group=EXCLUDED.muscle_group,
+         instructions_ru=EXCLUDED.instructions_ru,
+         name_ru=EXCLUDED.name_ru,
+         body_part_ru=EXCLUDED.body_part_ru,
+         equipment_ru=EXCLUDED.equipment_ru,
+         muscle_group_ru=EXCLUDED.muscle_group_ru,
+         movement_pattern=EXCLUDED.movement_pattern,
+         catalog_version=EXCLUDED.catalog_version,
+         training_contexts=EXCLUDED.training_contexts`,
+      [
+        ex.id, ex.name, ex.category,
+        ex.environment === 'gym' ? (ex.equipmentRu === 'Блок' ? 'cable' : 'gym') : 'body weight',
+        ex.muscle, ex.muscle,
+        ex.notes,
+        'anatomo-training-database',
+        ex.environmentRu, ex.equipmentRu, ex.muscle,
+        ex.primaryAction, ANATOMY_CATALOG_VERSION,
+        JSON.stringify([
+          ex.environment === 'home' ? 'home' : ex.environment === 'outdoor' ? 'outdoor' : 'gym',
+          ...(ex.environment === 'outdoor' ? ['functional'] : [])
+        ])
+      ]
+    );
+  }
+  await pool.query(
+    `INSERT INTO exercise_catalog_meta(key,value) VALUES('anatomy_version',$1)
+     ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
+    [ANATOMY_CATALOG_VERSION]
+  );
+  console.log('Anatomy exercise catalog synchronized:', ANATOMY_EXERCISES.length);
 }
 
 export async function syncExerciseCatalog(pool: Pool) {
