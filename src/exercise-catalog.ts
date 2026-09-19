@@ -201,7 +201,8 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
         (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url,
          gif_url,image_url,name_ru,body_part_ru,equipment_ru,muscle_group_ru,training_types,movement_pattern,level,
          catalog_version,training_contexts,gif_verified)
-       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,$9,$10,$2,$11,$12,$13,$14::jsonb,$15,$16,$17,$18::jsonb,$19)` ON CONFLICT (id) DO NOTHING,
+       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,$9,$10,$2,$11,$12,$13,$14::jsonb,$15,$16,$17,$18::jsonb ,$19)
+       ON CONFLICT (id) DO NOTHING`,
       [
         ex.id,
         ex.name,
