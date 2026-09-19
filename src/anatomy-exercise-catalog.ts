@@ -35,7 +35,7 @@ function toExercise(row: BaseRow): AnatomyExercise {
   };
 }
 
-export const ANATOMY_CATALOG_VERSION = 'base-2026-09-19-v7';
+export const ANATOMY_CATALOG_VERSION = 'base-2026-09-19-v8';
 export const ANATOMY_EXERCISES: AnatomyExercise[] = [
   ...TRAINING_BASE_ROWS_1,...TRAINING_BASE_ROWS_2,...TRAINING_BASE_ROWS_3
 ].map((row) => toExercise(row as BaseRow));
