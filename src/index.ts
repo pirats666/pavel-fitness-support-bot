@@ -228,6 +228,7 @@ bot.on('message:text',async ctx=>{
 });
 
 bot.catch(e=>console.error('Telegram bot error',e));
+void logDatabaseDiagnostics();
 const server=createServer((req,res)=>{if(req.url==='/health'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));return;}res.writeHead(404);res.end();});
 server.listen(PORT,()=>console.log('HTTP health server listening on '+PORT));
 async function shutdown(signal:string){console.log('Received '+signal+', shutting down');await bot.stop();await closeDb();server.close();process.exit(0);}
