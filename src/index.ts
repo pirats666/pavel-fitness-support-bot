@@ -925,14 +925,15 @@ async function createProgram(userId: number, correction = '') {
         trainingContexts: e.trainingContexts,
         movementPattern: e.movementPattern,
         level: e.level,
-        instructionsRu: e.instructionsRu
+        instructionsRu: e.instructionsRu,
+        gifUrl: e.gifUrl
       }));
 
       const aiPlan = await createAIWorkoutPlan(aiProfile, candidates, correction, allExerciseNames);
-      // Keep the strict trainer split authoritative. The deterministic planner uses the
-      // same anatomy catalog and questionnaire, while preventing AI from mixing day focuses.
-      program = await buildProgram(profile, version, correction);
-      console.log('AI analysis completed; strict trainer split applied', { userId, version, aiFormat: aiPlan?.format ?? 'none' });
+      // Use the validated AI plan when available. Deterministic planning is the fallback only.
+      const aiProgram = aiPlan ? convertAIPlanToProgram(aiPlan, profile, version, aiCandidates, correction) : null;
+      program = aiProgram ?? await buildProgram(profile, version, correction);
+      console.log('Program planning completed', { userId, version, source: aiProgram ? 'ai' : 'deterministic', aiFormat: aiPlan?.format ?? 'none' });
     } catch (error) {
       console.error('AI program failed; using deterministic planner', error);
       program = await buildProgram(profile, version, correction);
@@ -1282,8 +1283,13 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
     programId,
     day: dayNumber,
     muscleGroup: group,
+    exerciseIndex: targetExerciseIndex,
     catalogChoices: unique.map((row) => row.id)
   });
+
+  const day = program.days.find((d) => d.day === dayNumber);
+  const targetExerciseIndex = day?.exercises.findIndex((exercise) => exerciseMuscleGroup(exercise.name, day.focus) === group) ?? -1;
+  if (targetExerciseIndex < 0) return ctx.reply('В выбранном дне нет упражнения этой группы.');
 
   const kb = new InlineKeyboard();
   unique.slice(0, 50).forEach((row, index) => {
@@ -1293,7 +1299,7 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
   kb.text('⬅️ Группы', `program:correct:day:${programId}:${dayNumber}`);
 
   await ctx.reply(
-    `💪 <b>${escapeHtml(group)}</b>\\n\\nВсе упражнения этой группы из анатомической базы для текущего места тренировок.\\nВыбери упражнение — оно сразу заменит первое упражнение этой группы в выбранном дне.`,
+    `💪 <b>${escapeHtml(group)}</b>\\n\\nВсе упражнения этой группы из анатомической базы для текущего места тренировок.\\nВыбери упражнение — оно заменит текущее упражнение этой группы в выбранном дне.`,
     {parse_mode:'HTML',reply_markup:kb}
   );
 }
@@ -2109,7 +2115,7 @@ function correctionGroupFromSlug(slug: string) {
   return ({ch:'Грудь',back:'Спина',sh:'Плечи',arms:'Руки',legs:'Ноги',core:'Кор'} as Record<string,string>)[slug] ?? '';
 }
 
-bot.callbackQuery(/^program:correct:group:(\\d+):(\\d+):([^:]+)$/, async (ctx) => {
+bot.callbackQuery(/^program:correct:group:(\d+):(\d+):([^:]+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const programId = Number(ctx.match[1]);
   const day = Number(ctx.match[2]);
@@ -2120,7 +2126,7 @@ bot.callbackQuery(/^program:correct:group:(\\d+):(\\d+):([^:]+)$/, async (ctx) =
   await showCorrectionExercises(ctx,programId,day,group);
 });
 
-bot.callbackQuery(/^program:correct:pick:(\\d+):(\\d+):(\\d+)$/, async (ctx) => {
+bot.callbackQuery(/^program:correct:pick:(\d+):(\d+):(\d+)$/, async (ctx) => {
   if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   const programId = Number(ctx.match[1]);
   const dayNumber = Number(ctx.match[2]);
@@ -2165,7 +2171,7 @@ bot.callbackQuery(/^program:correct:pick:(\\d+):(\\d+):(\\d+)$/, async (ctx) => 
   const nextDay = nextProgram.days.find((d) => d.day === dayNumber);
   if (!nextDay) return ctx.answerCallbackQuery({ text: 'День не найден.' });
 
-  const targetIndex = nextDay.exercises.findIndex((exercise) => exerciseMuscleGroup(exercise.name, nextDay.focus) === group);
+  const targetIndex = session.exerciseIndex ?? nextDay.exercises.findIndex((exercise) => exerciseMuscleGroup(exercise.name, nextDay.focus) === group);
   if (targetIndex >= 0) nextDay.exercises[targetIndex] = replacement;
   else nextDay.exercises.push(replacement);
   nextProgram.notes = [...(nextProgram.notes ?? []), `Коррекция: ${group} — ${replacement.name}.`];
