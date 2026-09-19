@@ -29,7 +29,7 @@ function toExercise(row: BaseRow): AnatomyExercise {
   const category = CATEGORY[group];
   if (!environment || !category) throw new Error('Unknown training-base row: ' + JSON.stringify(row));
   return {
-    id:`base-${environment}-${slug(group)}-${slug(muscle)}-${slug(name)}`,
+    id:`base-${environment}-${slug(group)}-${slug(muscle)}-${slug(name)}-${slug(subdivision)}-${slug(equipmentRu)}`,
     name,muscleGroup:group,muscle,subdivision,primaryAction,environment,environmentRu,category,equipmentRu,
     notes:NOTES,levelRu,typeRu,progression:PROGRESSION
   };
