@@ -1,8 +1,8 @@
 import type { Pool } from 'pg';
 
 const CATALOG_VERSION = '2026-09-r2';
-const SOURCE_JSON = 'https://raw.githubusercontent.com/plataformafitness/exercises-dataset-main/main/data/exercises.json';
-const MEDIA_BASE = 'https://raw.githubusercontent.com/plataformafitness/exercises-dataset-main/main/';
+const SOURCE_JSON = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/data/exercises.json';
+const MEDIA_BASE = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/';
 
 function norm(value: string) {
   return String(value ?? '').toLowerCase().replace(/ё/g, 'ё').trim();
