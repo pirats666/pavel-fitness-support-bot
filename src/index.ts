@@ -621,7 +621,7 @@ function exercisePrescription(row: LibraryExercise, profile: ProfileForProgram, 
 
   return {
     id: row.id,
-    muscleGroup: row.bodyPartRu || row.muscleGroupRu,
+    muscleGroup: row.muscleGroupRu || row.bodyPartRu,
     movementPattern: row.movementPattern,
     name: row.nameRu || ruExerciseName(row.name),
     gifUrl: row.gifUrl,
