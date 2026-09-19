@@ -639,7 +639,7 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
       // Each day receives its own block of exercises; never rotate the same pool across days.
       dayExercises = block.map((e) => ({ ...e }));
       if (dayExercises.length < 4) {
-        const remaining = baseRows.filter((e) => !days.slice(0, i).some((d) => d.exercises.some((x) => x.name === e.name)));
+        const remaining = baseRows.slice(end).filter((e) => !dayExercises.some((x) => x.name === e.name));
         dayExercises = [...dayExercises, ...remaining.slice(0, 4 - dayExercises.length).map((e) => ({ ...e }))];
       }
     } else {
