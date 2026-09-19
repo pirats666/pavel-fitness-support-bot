@@ -789,12 +789,42 @@ function resolveGifUrl(gifUrl?: string) {
   return 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/' + gifUrl.replace(/^\/+/, '');
 }
 
+function stripHtml(value: string) {
+  return value
+    .replace(/<[^>]*>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
+}
+
 async function sendProgramText(ctx: any, text: string, replyMarkup?: InlineKeyboard) {
+  // Telegram allows up to 4096 characters in a text message. Keep a safe margin
+  // and split on real newlines so we never cut an HTML tag in half.
   const limit = 3500;
   const chunks: string[] = [];
   let current = '';
-  for (const line of text.split('\\n')) {
-    const candidate = current ? current + '\\n' + line : line;
+
+  for (const line of text.split('\n')) {
+    // A single generated line can theoretically be longer than the safe limit.
+    // Split that line without ever breaking an HTML tag.
+    if (line.length > limit) {
+      if (current) {
+        chunks.push(current);
+        current = '';
+      }
+      let rest = line;
+      while (rest.length > limit) {
+        let cut = rest.lastIndexOf(' ', limit);
+        if (cut < 1) cut = limit;
+        chunks.push(rest.slice(0, cut));
+        rest = rest.slice(cut).trimStart();
+      }
+      if (rest) current = rest;
+      continue;
+    }
+
+    const candidate = current ? current + '\n' + line : line;
     if (current && candidate.length > limit) {
       chunks.push(current);
       current = line;
@@ -802,10 +832,27 @@ async function sendProgramText(ctx: any, text: string, replyMarkup?: InlineKeybo
       current = candidate;
     }
   }
+
   if (current) chunks.push(current);
+
   for (let i = 0; i < chunks.length; i++) {
-    const options = { parse_mode: 'HTML' as const, ...(i === chunks.length - 1 && replyMarkup ? { reply_markup: replyMarkup } : {}) };
-    await ctx.reply(chunks[i], options);
+    const options = i === chunks.length - 1 && replyMarkup
+      ? { reply_markup: replyMarkup }
+      : {};
+
+    try {
+      await ctx.reply(chunks[i], { ...options, parse_mode: 'HTML' as const });
+    } catch (error) {
+      const message = String((error as any)?.message ?? '');
+      if (!/can't parse entities|cannot parse entities|Bad Request/i.test(message)) {
+        throw error;
+      }
+
+      // Formatting must never prevent delivery of a saved program.
+      // If Telegram rejects HTML, resend the exact chunk as plain text.
+      console.warn('Telegram rejected program HTML; retrying plain text', { chunk: i + 1, error });
+      await ctx.reply(stripHtml(chunks[i]), options);
+    }
   }
 }
 
