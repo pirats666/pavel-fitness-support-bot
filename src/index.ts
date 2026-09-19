@@ -485,7 +485,6 @@ function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desired
   if (!gym && /(body weight|bodyweight)/.test(text)) score += 10;
   if (usedIds.has(row.id)) score -= 25;
   if (profile.workout_duration <= 45 && difficulty === 3) score -= 7;
-  if (!row.gifUrl) score -= 8;
   if (!row.nameRu || row.nameRu === 'Функциональное упражнение') score -= 3;
 
   return score;
@@ -751,7 +750,6 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     const movement = normalize(row.movementPattern);
     if (/присед|жим|тяга|подтяг|отжим|румын|hip thrust|ягодичный мост|выпад|squat|press|row|pull|deadlift/.test(text)) score += 20;
     if (/присед|жим|тяга|сгибание|разгибание|анти|ротац|стабилиз|squat|press|pull|push|hinge|carry/.test(movement)) score += 8;
-    if (row.gifUrl) score += 3;
     if (row.level === 'beginner') score += beginner ? 8 : 2;
     if (normalizedProfile.goal === 'mass' && row.trainingTypes.includes('hypertrophy')) score += 8;
     if (normalizedProfile.goal === 'loss' && row.trainingTypes.includes('endurance')) score += 5;
@@ -1020,7 +1018,6 @@ function convertAIPlanToProgram(aiPlan: Awaited<ReturnType<typeof createAIWorkou
         muscleGroup: row.bodyPartRu || row.muscleGroupRu,
         movementPattern: row.movementPattern,
         name: row.nameRu || ruExerciseName(row.name),
-        gifUrl: row.gifUrl,
         sets: item.sets,
         reps: item.reps,
         rest: item.rest,
