@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
 import { Bot, InlineKeyboard, type Context } from 'grammy';
-import { closeDb, createClient, deleteClient, getClient, listClients, updateClientField } from './db.js';
+import { closeDb, createClient, deleteClient, getClient, listClients, updateClientField, logDatabaseDiagnostics } from './db.js';
 import type { Client, ClientDraft, AddSession } from './types.js';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
