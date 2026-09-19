@@ -14,7 +14,11 @@ export async function migrateStage1Schema(): Promise<void> {
   const { rows } = await pool.query(
     `SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='clients' AND column_name='name'`
   );
-  if (rows.length) return;
+  if (rows.length) {
+    await pool.query(`ALTER TABLE public.clients ALTER COLUMN telegram_username DROP NOT NULL`);
+    await pool.query(`ALTER TABLE public.clients ALTER COLUMN telegram_first_name DROP NOT NULL`);
+    return;
+  }
 
   await pool.query(`ALTER TABLE public.clients ALTER COLUMN telegram_username DROP NOT NULL`);
   await pool.query(`ALTER TABLE public.clients RENAME COLUMN telegram_id TO telegram_user_id`);
