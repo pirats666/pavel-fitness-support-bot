@@ -472,7 +472,7 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
   const equipmentFilter = profile.location === 'gym' || profile.location === 'mixed'
     ? `equipment <> ''`
     : profile.location === 'outdoor'
-      ? `equipment = 'body weight' AND COALESCE(equipment_ru, '') = 'Собственный вес'`
+      ? `equipment = 'body weight' AND COALESCE(equipment_ru, '') LIKE 'Собственный вес%'`
       : `equipment = 'body weight'`;
 
   const { rows } = await pool.query(
@@ -631,15 +631,21 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     let dayExercises: Exercise[];
 
     if (baseRows.length) {
-      // Rotate the ranked exercise pool with a larger step so weekly sessions are meaningfully different.
-      const perDay = Math.min(6, Math.max(4, Math.floor(baseRows.length / daysCount)));
+      const perDay = Math.min(8, Math.max(4, Math.floor(baseRows.length / daysCount)));
       const start = i * perDay;
       const end = Math.min(start + perDay, baseRows.length);
       const block = baseRows.slice(start, end);
-      // Each day receives its own block of exercises; never rotate the same pool across days.
       dayExercises = block.map((e) => ({ ...e }));
+
+      // If the last day is short, borrow only exercises that have not appeared
+      // in any previous day. This keeps every workout unique whenever the pool allows it.
       if (dayExercises.length < 4) {
-        const remaining = baseRows.slice(end).filter((e) => !dayExercises.some((x) => x.name === e.name));
+        const usedNames = new Set(
+          days.slice(0, i).flatMap((d) => d.exercises.map((x) => x.name))
+        );
+        const remaining = baseRows
+          .slice(end)
+          .filter((e) => !usedNames.has(e.name) && !dayExercises.some((x) => x.name === e.name));
         dayExercises = [...dayExercises, ...remaining.slice(0, 4 - dayExercises.length).map((e) => ({ ...e }))];
       }
     } else {
@@ -1002,64 +1008,67 @@ async function sendProgramText(ctx: any, text: string, replyMarkup?: InlineKeybo
 }
 
 async function sendProgramMedia(ctx: any, program: Program, replyMarkup?: InlineKeyboard) {
-  const header = [
+  await sendProgramText(ctx, [
     `🏋️ <b>${escapeHtml(program.title)}</b>`,
-    `🎯 Цель: <b>${escapeHtml(program.goal)}</b>`,
-    `📍 Формат: <b>${escapeHtml(program.location)}</b>`,
-    `📅 График: <b>${program.frequency} тренировок/неделю</b>`,
-    `⏱ Длительность: <b>${program.duration} мин</b>`,
+    `🎯 Цель: ${escapeHtml(program.goal)}`,
+    `📍 Формат: ${escapeHtml(program.location)}`,
+    `📅 График: ${program.frequency} тренировок/неделю`,
+    `⏱ Длительность: ${program.duration} мин`,
     '',
     `📈 <b>Прогрессия</b>`,
     escapeHtml(program.progression)
-  ].join('\\n');
-  await sendProgramText(ctx, header);
+  ].join('\n'));
 
   for (const day of program.days) {
     await sendProgramText(ctx, [
-      '',
-      '━━━━━━━━━━━━━━',
-      `🏋️ <b>${escapeHtml(day.title)}</b>`,
+      '━━━━━━━━━━━━━━━━━━',
+      `🏋️ <b>ДЕНЬ ${day.day}</b>`,
       `🎯 <b>${escapeHtml(day.focus)}</b>`,
       '',
-      '🔥 <b>Разминка</b>',
+      '🔥 <b>РАЗМИНКА</b>',
       escapeHtml(day.warmup),
       '',
-      '💪 <b>Основная часть</b>'
-    ].join('\\n'));
+      '💪 <b>УПРАЖНЕНИЯ</b>'
+    ].join('\n'));
 
     for (let i = 0; i < day.exercises.length; i++) {
       const exercise = day.exercises[i];
       const exerciseText = [
         `<b>${i + 1}. ${escapeHtml(exercise.name)}</b>`,
-        `Подходы: <b>${exercise.sets}</b> · Повторения: <b>${escapeHtml(exercise.reps)}</b>`,
-        `Отдых: <b>${escapeHtml(exercise.rest)}</b>`,
-        exercise.recommendation ? `💡 ${escapeHtml(exercise.recommendation)}` : ''
-      ].filter(Boolean).join('\\n');
+        `Подходы: ${exercise.sets}`,
+        `Повторения: ${escapeHtml(exercise.reps)}`,
+        `Отдых: ${escapeHtml(exercise.rest)}`
+      ].join('\n');
 
       await sendProgramText(ctx, exerciseText);
 
       const url = resolveGifUrl(exercise.gifUrl);
       if (url) {
         try {
-          await ctx.replyWithAnimation(url, { caption: `${i + 1}. ${exercise.name}` });
+          await ctx.replyWithAnimation(url, {
+            caption: `<b>${i + 1}. ${escapeHtml(exercise.name)}</b>`,
+            parse_mode: 'HTML'
+          });
         } catch (error) {
           console.error('exercise gif send failed', { name: exercise.name, url, error });
         }
+      } else {
+        console.warn('exercise has no GIF', { name: exercise.name });
       }
     }
 
     await sendProgramText(ctx, [
-      '🧘 <b>Заминка</b>',
+      '',
+      '🧘 <b>ЗАМИНКА</b>',
       escapeHtml(day.cooldown)
-    ].join('\\n'));
+    ].join('\n'));
   }
 
-  const notes = [
-    '━━━━━━━━━━━━━━',
-    '📝 <b>Примечания</b>',
+  await sendProgramText(ctx, [
+    '━━━━━━━━━━━━━━━━━━',
+    '📝 <b>ПРИМЕЧАНИЯ</b>',
     ...program.notes.map((note) => '• ' + escapeHtml(note))
-  ].join('\\n');
-  await sendProgramText(ctx, notes, replyMarkup);
+  ].join('\n'), replyMarkup);
 }
 function programText(program: Program) {
   const parts = [
