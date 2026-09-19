@@ -6,7 +6,7 @@ const SOURCE_JSON = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dat
 const MEDIA_BASE = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/';
 
 function norm(value: string) {
-  return String(value ?? '').toLowerCase().replace(/ё/g, 'ё').trim();
+  return String(value ?? '').toLowerCase().replace(/ё/g, 'е').trim();
 }
 
 function bodyPartRu(value: string) {
@@ -248,8 +248,8 @@ const mediaForExercise = (ex: typeof ANATOMY_EXERCISES[number]) => {
       `INSERT INTO exercise_library
         (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url,
          gif_url,image_url,name_ru,body_part_ru,equipment_ru,muscle_group_ru,training_types,movement_pattern,level,
-         catalog_version,training_contexts)
-       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,$14,$15,$2,$9,$10,$11,'["maintenance","strength","hypertrophy"]'::jsonb,$12,'beginner',$13,$16::jsonb)
+         catalog_version,training_contexts,gif_verified)
+       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,$14,$15,$2,$9,$10,$11,'["maintenance","strength","hypertrophy"]'::jsonb,$12,'beginner',$13,$16::jsonb,$17)
        ON CONFLICT (id) DO UPDATE SET
          name=EXCLUDED.name,
          category=EXCLUDED.category,
@@ -264,6 +264,7 @@ const mediaForExercise = (ex: typeof ANATOMY_EXERCISES[number]) => {
          movement_pattern=EXCLUDED.movement_pattern,
          catalog_version=EXCLUDED.catalog_version,
          training_contexts=EXCLUDED.training_contexts,
+         gif_verified=EXCLUDED.gif_verified,
          gif_url=EXCLUDED.gif_url,
          image_url=EXCLUDED.image_url`,
       [
@@ -278,7 +279,8 @@ const mediaForExercise = (ex: typeof ANATOMY_EXERCISES[number]) => {
         JSON.stringify([
           ex.environment === 'home' ? 'home' : ex.environment === 'outdoor' ? 'outdoor' : 'gym',
           ...(ex.environment === 'outdoor' ? ['functional'] : [])
-        ])
+        ]),
+        Boolean(matchedMedia.gifUrl)
       ]
     );
   }
@@ -294,6 +296,7 @@ export async function syncExerciseCatalog(pool: Pool) {
   const metaTable = 'exercise_catalog_meta';
   await pool.query('CREATE TABLE IF NOT EXISTS exercise_catalog_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
   await pool.query("ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS training_contexts JSONB NOT NULL DEFAULT '[]'::jsonb");
+  await pool.query("ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS gif_verified BOOLEAN NOT NULL DEFAULT FALSE");
   const meta = await pool.query('SELECT value FROM exercise_catalog_meta WHERE key=$1', ['version']);
   if (meta.rows[0]?.value === CATALOG_VERSION) return;
 
