@@ -214,6 +214,24 @@ async function ensureDatabase() {
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_total INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_remaining INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_focus TEXT NOT NULL DEFAULT 'auto';
+    CREATE TABLE IF NOT EXISTS exercise_library (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT '',
+      equipment TEXT NOT NULL DEFAULT '',
+      target TEXT NOT NULL DEFAULT '',
+      muscle_group TEXT NOT NULL DEFAULT '',
+      secondary_muscles JSONB NOT NULL DEFAULT '[]'::jsonb,
+      instructions_ru TEXT NOT NULL DEFAULT '',
+      source_url TEXT NOT NULL,
+      gif_url TEXT NOT NULL DEFAULT '',
+      image_url TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS exercise_library_equipment_idx ON exercise_library (equipment);
+    CREATE INDEX IF NOT EXISTS exercise_library_category_idx ON exercise_library (category);
+    CREATE INDEX IF NOT EXISTS exercise_library_target_idx ON exercise_library (target);
+
     ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS gif_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS name_ru TEXT NOT NULL DEFAULT '';
