@@ -332,6 +332,7 @@ function buildInstructions(profile: AIPlannerProfile, exercises: AIExerciseCandi
     '12) cooldown — только описание отдельной заминки; не помещай упражнения заминки в exercises.',
     '13) Каждая основная тренировка должна иметь понятный приоритет: крупные многосуставные движения/ключевые паттерны в начале, затем вспомогательная работа.',
     '14) Не допускай бессмысленного дублирования одинакового движения или одной и той же мышечной нагрузки без причины.',
+    'ЖЁСТКОЕ ПРАВИЛО РАЗНООБРАЗИЯ НЕДЕЛИ: не используй один и тот же exerciseId в разных днях одной программы. Каждый день должен иметь собственный набор упражнений. Повторять можно только анатомическую группу/двигательный паттерн, но через другую конкретную вариацию из каталога.',
     '15) Если времени мало, сначала оставь ключевые упражнения по цели и сократи вспомогательные, а не убирай разминку и не превращай разминку в основную тренировку.'
   ].join('\n');
 }
@@ -348,8 +349,17 @@ function validatePlan(plan: AIWorkoutPlan, profile: AIPlannerProfile, catalog: A
     if (!Array.isArray(day.exercises) || day.exercises.length < 4 || day.exercises.length > 8) {
       throw new Error('AI returned invalid exercise count');
     }
+
+    const daySeen = new Set<string>();
     for (const ex of day.exercises) {
       if (!allowed.has(ex.exerciseId)) throw new Error('AI selected an unknown exercise');
+      if (daySeen.has(ex.exerciseId)) {
+        throw new Error('AI repeated an exercise inside one workout day');
+      }
+      if (seen.has(ex.exerciseId)) {
+        throw new Error('AI repeated an exercise across different workout days');
+      }
+
       const selected = catalog.find((item) => item.id === ex.exerciseId);
       if (profile.location === 'gym' && selected?.equipmentRu === 'Собственный вес') {
         throw new Error('AI selected a bodyweight-only exercise for a gym program');
@@ -358,11 +368,17 @@ function validatePlan(plan: AIWorkoutPlan, profile: AIPlannerProfile, catalog: A
         throw new Error('AI selected non-bodyweight exercise for an outdoor program');
       }
       if (!Number.isInteger(ex.sets) || ex.sets < 1 || ex.sets > 6) throw new Error('AI returned invalid sets');
+
+      daySeen.add(ex.exerciseId);
       seen.add(ex.exerciseId);
     }
   }
 
-  if (seen.size < 4) throw new Error('AI plan lacks exercise variety');
+  // With a multi-day program, variety is a hard requirement: a new day must not
+  // simply be a copy of another day with different text or set counts.
+  if (seen.size < profile.workoutsPerWeek * 4) {
+    throw new Error('AI plan does not contain enough unique exercises for all workout days');
+  }
 }
 
 export async function createAIWorkoutPlan(
