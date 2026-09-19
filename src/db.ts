@@ -101,3 +101,16 @@ export async function logDatabaseDiagnostics(): Promise<void> {
     console.error('[DB DIAGNOSTIC] Failed:', e);
   }
 }
+
+export async function runStage1DbInsertTest(): Promise<void> {
+  const { rows } = await pool.query<Client>(
+    `INSERT INTO public.clients
+      (name, telegram_user_id, telegram_username, telegram_first_name, telegram_last_name,
+       age, height_cm, weight_kg, goal, experience, workouts_per_week, training_location, limitations, note)
+     VALUES ('@test_client', NULL, 'test_client', NULL, NULL, 32, 171, 63, 'Набор мышечной массы', 'Новичок', 4, 'Зал', 'Нет', 'DB diagnostic test')
+     RETURNING *`
+  );
+  console.info('[DB INSERT TEST] SUCCESS id=%s row=%j', rows[0].id, rows[0]);
+  await pool.query('DELETE FROM public.clients WHERE id = $1', [rows[0].id]);
+  console.info('[DB INSERT TEST] CLEANED id=%s', rows[0].id);
+}
