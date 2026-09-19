@@ -176,7 +176,7 @@ const editPrompts:Record<keyof ClientDraft,string>={
   goal:'Выберите основную цель клиента:',experience:'Выберите тренировочный опыт:',workouts_per_week:'Сколько тренировок в неделю планируется?',
   training_location:'Где клиент будет тренироваться?',limitations:'Введите ограничения текстом:',note:'Введите дополнительную заметку:'
 };
-bot.callbackQuery(/editfield:(\\d+):(.+)/,async ctx=>{const id=Number(ctx.match[1]);const field=ctx.match[2] as keyof ClientDraft;const allowed=Object.keys(editPrompts);if(!allowed.includes(field))return;await ctx.answerCallbackQuery();editSessions.set(ctx.from.id,{clientId:id,field});await render(ctx,editPrompts[field],editChoices(field));});
+bot.callbackQuery(/editfield:(\\d+):(.+)/,async ctx=>{const id=Number(ctx.match[1]);const field=ctx.match[2] as keyof ClientDraft;const allowed=Object.keys(editPrompts);if(!allowed.includes(field) || !editPrompts[field])return;await ctx.answerCallbackQuery();editSessions.set(ctx.from.id,{clientId:id,field});await render(ctx,editPrompts[field]!,editChoices(field));});
 bot.callbackQuery('editcancel',async ctx=>{await ctx.answerCallbackQuery();const s=editSessions.get(ctx.from.id);editSessions.delete(ctx.from.id);if(s)await showClient(ctx,s.clientId);});
 for(const [label,data] of GOALS) bot.callbackQuery('edit:'+data,async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='goal')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'goal',label);editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
 for(const [label,data] of EXPERIENCES) bot.callbackQuery('edit:'+data,async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='experience')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'experience',label);editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
@@ -202,7 +202,7 @@ bot.on('message:text',async ctx=>{
       if(edit.field==='age'){const n=Number(t);if(!/^\\d+$/.test(t)||!Number.isInteger(n)||n<1||n>120)return ctx.reply('Введите возраст числом.');value=n;}
       if(edit.field==='height_cm'){const n=positiveNumber(t);if(n===null||n>300)return ctx.reply('Введите рост числом.');value=n;}
       if(edit.field==='weight_kg'){const n=positiveNumber(t);if(n===null||n>500)return ctx.reply('Введите вес числом.');value=n;}
-      if(edit.field==='name') return ctx.reply('Имя клиента берётся из Telegram-профиля и не редактируется.');
+      if(edit.field.startsWith('telegram_')) return ctx.reply('Данные Telegram-профиля не редактируются вручную.');
       const c=await updateClientField(edit.clientId,edit.field,value);editSessions.delete(uid);if(c)await showClient(ctx,c.id);
     }catch(e){console.error(e);await ctx.reply('Не удалось сохранить изменение.');}
   }
