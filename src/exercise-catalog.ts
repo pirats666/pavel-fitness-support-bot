@@ -219,6 +219,7 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
         JSON.stringify(trainingTypes),
         ex.primaryAction,
         level,
+        '© Gym visual — https://gymvisual.com/',
         ANATOMY_CATALOG_VERSION,
         JSON.stringify([...new Set(contexts)]),
         Boolean(media.gifUrl)
@@ -284,7 +285,7 @@ export async function syncExerciseCatalog(pool: Pool) {
         name_ru=$2, body_part_ru=$3, equipment_ru=$4, muscle_group_ru=$5,
         training_types=$6::jsonb, movement_pattern=$7, level=$8, media_id=$9,
         gif_url='', image_url='', gif_verified=FALSE,
-        attribution=$12, catalog_version=$13, training_contexts=$14::jsonb
+        attribution=$10, catalog_version=$11, training_contexts=$12::jsonb
        WHERE id=$1`,
       [
         id, nameRu(name), bodyPartRu(category), equipmentRu(equipment), muscleRu(muscleGroup,target),
