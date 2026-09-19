@@ -2199,3 +2199,388 @@ bot.on('message:text', async (ctx) => {
       const internalId = -clientId;
     await pool.query(
       "INSERT INTO trainer_profiles (telegram_user_id, telegram_username, first_name, goal, experience, location, workouts_per_week, workout_duration, limitations) VALUES ($1,$2,$3,'health','beginner','gym',1,60,'')",
+      [internalId, addSession.username, name]
+    );
+    clientAddSessions.delete(ctx.from.id);
+    clientSearchSessions.delete(ctx.from.id);
+    selectedClient.set(ctx.from.id, internalId);
+    return ctx.reply(`✅ <b>Клиент добавлен</b>
+
+👤 ${name}
+🔗 @${addSession.username}
+
+Теперь клиент выбран. <b>Анкету заполняешь ты</b> — клиенту ничего делать не нужно.`, {
+      parse_mode: 'HTML',
+      reply_markup: new InlineKeyboard()
+        .text('📝 Заполнить анкету', 'client:quiz')
+        .row()
+        .text('📐 Замеры', 'client:measurements')
+        .row()
+        .text('💳 Оплата', 'client:payment')
+        .row()
+        .text('🏋️ Программа', 'client:program')
+        .row()
+        .text('⬅️ Клиенты', 'admin:profiles')
+    });
+    }
+  }
+  const searchSession = clientSearchSessions.get(ctx.from.id);
+  if (searchSession) {
+    const query = ctx.message.text.trim();
+    clientSearchSessions.delete(ctx.from.id);
+    const profiles = await searchClients(query);
+    if (!profiles.length) {
+      return ctx.reply(`🔎 По запросу «${query}» ничего не найдено.`, {
+        reply_markup: new InlineKeyboard().text('🔎 Попробовать снова', 'admin:search').row().text('⬅️ Админ-панель', 'admin:open')
+      });
+    }
+    const text = profiles.map((p: any, i: number) => clientSummary(p, i + 1)).join('\n\n');
+    const keyboard = new InlineKeyboard();
+    profiles.slice(0, 20).forEach((p: any, i: number) => {
+      keyboard.text(`${i + 1}. ${(p.telegram_username ? '@' + p.telegram_username : p.first_name || 'Клиент').slice(0, 28)}`, `client:select:${p.client_id}`).row();
+    });
+    keyboard.text('🔎 Новый поиск', 'admin:search').row().text('⬅️ Клиенты', 'admin:profiles');
+    return ctx.reply(`🔎 <b>Результаты поиска</b>
+
+${text}
+
+Нажми на нужного клиента — все дальнейшие действия будут выполняться для него.`, {
+      parse_mode: 'HTML',
+      reply_markup: keyboard
+    });
+  }
+
+  const measurement = measurementSessions.get(ctx.from.id);
+  if (measurement) {
+    const parts = ctx.message.text.split(',').map((v) => v.trim());
+    if (parts.length < 7) return ctx.reply('Нужно 7 значений через запятую: вес, грудь, талия, бёдра, рука, бедро, % жира.');
+    const nums = parts.slice(0, 7).map((v) => v === '-' || v === '' ? null : Number(v.replace(',', '.')));
+    if (nums.some((v) => v !== null && (!Number.isFinite(v) || v < 0))) return ctx.reply('Проверь значения замеров. Используй числа или «-».');
+    const [weight, chest, waist, hips, arm, thigh, bodyFat] = nums;
+    await pool.query(
+      'INSERT INTO measurements (telegram_user_id, weight_kg, chest_cm, waist_cm, hips_cm, arm_cm, thigh_cm, body_fat_pct) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+      [measurement.targetId, weight, chest, waist, hips, arm, thigh, bodyFat]
+    );
+    measurementSessions.delete(ctx.from.id);
+    await ctx.reply('✅ Замеры сохранены для выбранного клиента.', {
+      reply_markup: new InlineKeyboard().text('📐 Открыть замеры', 'client:measurements').row().text('⬅️ Карточка клиента', 'admin:profiles')
+    });
+    return;
+  }
+
+  const payment = paymentSessions.get(ctx.from.id);
+  if (payment) {
+    const rawText = ctx.message.text.trim();
+    const value = Number(rawText.replace(',', '.'));
+    if (payment.step === 'amount') {
+      payment.amount = value;
+      payment.step = 'total';
+      return ctx.reply('🏋️ Сколько тренировок оплачено? Например: 12');
+    }
+    if (payment.step === 'total') {
+      if (!Number.isInteger(value)) return ctx.reply('Количество тренировок должно быть целым числом.');
+      payment.total = value;
+      payment.step = 'remaining';
+      return ctx.reply('⏳ Сколько тренировок осталось? Например: 10');
+    }
+    if (!Number.isInteger(value) || value > (payment.total ?? 0)) return ctx.reply('Остаток должен быть целым числом и не больше общего количества тренировок.');
+    const amount = payment.amount ?? 0;
+    const total = payment.total ?? 0;
+    const targetId = payment.targetId ?? selectedClient.get(ctx.from.id) ?? ctx.from.id;
+    await updatePaymentInfo(targetId, amount, total, value);
+    await pool.query(
+      'INSERT INTO payment_history (telegram_user_id, type, amount, sessions, remaining, note) VALUES ($1,\'payment\',$2,$3,$4,\'Изменение оплаты и пакета тренировок\')',
+      [targetId, amount, total, value]
+    );
+    paymentSessions.delete(ctx.from.id);
+    await ctx.reply('✅ Данные по оплате и тренировкам сохранены.');
+    return sendPaymentPanel(ctx, targetId);
+  }
+
+  const correction = correctionSessions.get(ctx.from.id);
+  if (correction) {
+    const request = ctx.message.text.trim();
+    correctionSessions.delete(ctx.from.id);
+
+    let scopedRequest = request;
+    if (correction.day && correction.exerciseIndex !== undefined) {
+      const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [correction.programId]);
+      const program = rows[0]?.program as Program | undefined;
+      const exercise = program?.days.find((d) => d.day === correction.day)?.exercises[correction.exerciseIndex];
+      if (exercise) {
+        scopedRequest = `Точечная коррекция. День ${correction.day}. Группа мышц: ${exerciseMuscleGroup(exercise.name)}. Упражнение: «${exercise.name}». Требование тренера: ${request}`;
+      }
+    } else if (correction.muscleGroup) {
+      scopedRequest = `Корректировать только группу мышц «${correction.muscleGroup}». Требование тренера: ${request}`;
+    }
+
+    const targetId = selectedClient.get(ctx.from.id) ?? ctx.from.id;
+    const created = await createProgram(targetId, scopedRequest);
+    if (!created) return ctx.reply('Сначала заполните профиль.');
+    await ctx.reply(`Готово. Создана версия ${created.version} с учётом коррекции:\n«${escapeHtml(request)}»`, { parse_mode: 'HTML' });
+    return sendProgramMedia(ctx, created.program, programKeyboard(created.id));
+  }
+
+  const session = sessions.get(ctx.from.id);
+  if (!session || session.step !== 'limitations') return;
+  const limitations = ctx.message.text.trim();
+  try {
+    const targetId = quizTargets.get(ctx.from.id) ?? ctx.from.id;
+    clientSearchSessions.delete(ctx.from.id);
+    const existingTarget = await getProfile(targetId);
+    await saveProfile({
+      id: targetId,
+      username: existingTarget?.telegram_username ?? (targetId === ctx.from.id ? ctx.from.username : undefined),
+      firstName: existingTarget?.first_name ?? (targetId === ctx.from.id ? ctx.from.first_name : undefined)
+    }, { ...session, limitations });
+    sessions.delete(ctx.from.id);
+    quizTargets.delete(ctx.from.id);
+    const created = await createProgram(targetId);
+    if (!created) return ctx.reply('Профиль сохранён, но программу создать не удалось.');
+    await ctx.reply('Профиль сохранён ✅\n\nПрограмма составлена автоматически. Ниже — первая версия.');
+    const targetProfile = await getProfile(targetId);
+    await sendProgramMedia(ctx, created.program, programKeyboard(created.id));
+  } catch (error) {
+    console.error('save profile/program error', error);
+    const message = String((error as any)?.message ?? '');
+    if (/can't parse entities|Bad Request/i.test(message)) {
+      await ctx.reply('⚠️ Программа сохранена, но Telegram не принял формат сообщения. Исправление уже внесено — повтори создание программы.');
+    } else {
+      await ctx.reply('Не удалось сохранить профиль или программу. Проверь подключение базы данных.');
+    }
+  }
+});
+
+bot.callbackQuery(/^program:correct:(\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const programId = Number(ctx.match[1]); correctionSessions.set(ctx.from.id,{programId});
+  await ctx.answerCallbackQuery(); await showCorrectionDays(ctx,programId);
+});
+
+bot.callbackQuery(/^program:correct:days:(\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const programId=Number(ctx.match[1]); correctionSessions.set(ctx.from.id,{programId});
+  await ctx.answerCallbackQuery(); await showCorrectionDays(ctx,programId);
+});
+
+bot.callbackQuery(/^program:correct:day:(\d+):(\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const programId=Number(ctx.match[1]), day=Number(ctx.match[2]);
+  correctionSessions.set(ctx.from.id,{programId,day}); await ctx.answerCallbackQuery();
+  await showCorrectionGroups(ctx,programId,day);
+});
+bot.callbackQuery(/^program:correct:back:(\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const programId = Number(ctx.match[1]);
+  const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
+  correctionSessions.delete(ctx.from.id);
+  if (!rows[0]) return ctx.answerCallbackQuery({ text: 'Программа не найдена.' });
+  await ctx.answerCallbackQuery();
+  return sendProgramMedia(ctx, rows[0].program as Program, programKeyboard(programId));
+});
+
+
+function correctionGroupSlug(group: string) {
+  return ({'Грудь':'ch','Спина':'back','Плечи':'sh','Руки':'arms','Ноги':'legs','Кор':'core'} as Record<string,string>)[group] ?? 'other';
+}
+
+function correctionGroupFromSlug(slug: string) {
+  return ({ch:'Грудь',back:'Спина',sh:'Плечи',arms:'Руки',legs:'Ноги',core:'Кор'} as Record<string,string>)[slug] ?? '';
+}
+
+bot.callbackQuery('base:groups', async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  await ctx.answerCallbackQuery();
+  await showExerciseBaseGroups(ctx);
+});
+
+bot.callbackQuery(/^base:group:([^:]+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const group = exerciseBaseGroupFromSlug(ctx.match[1]);
+  if (!group) return ctx.answerCallbackQuery({ text: 'Группа не найдена.' });
+  await ctx.answerCallbackQuery();
+  await showExerciseBaseEnvironments(ctx, group);
+});
+
+bot.callbackQuery(/^base:env:([^:]+):(home|gym|outdoor)$/, async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const group = exerciseBaseGroupFromSlug(ctx.match[1]);
+  const environment = exerciseBaseEnvFromSlug(ctx.match[2]);
+  if (!group || !environment) return ctx.answerCallbackQuery({ text: 'Раздел не найден.' });
+  await ctx.answerCallbackQuery();
+  await showExerciseBaseList(ctx, group, environment);
+});
+
+bot.callbackQuery('base:noop', async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  await ctx.answerCallbackQuery();
+});
+
+bot.callbackQuery(/^base:page:([^:]+):(home|gym|outdoor):(\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const group = exerciseBaseGroupFromSlug(ctx.match[1]);
+  const environment = exerciseBaseEnvFromSlug(ctx.match[2]);
+  const page = Number(ctx.match[3]);
+  if (!group || !environment || !Number.isInteger(page) || page < 0) {
+    return ctx.answerCallbackQuery({ text: 'Раздел не найден.' });
+  }
+  await ctx.answerCallbackQuery();
+  await showExerciseBaseList(ctx, group, environment, page);
+});
+
+bot.callbackQuery(/^base:view:([^:]+):(home|gym|outdoor):(\d+):(\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const group = exerciseBaseGroupFromSlug(ctx.match[1]);
+  const environment = exerciseBaseEnvFromSlug(ctx.match[2]);
+  const page = Number(ctx.match[3]);
+  const index = Number(ctx.match[4]);
+  if (!group || !environment || !Number.isInteger(page) || !Number.isInteger(index) || page < 0 || index < 0) {
+    return ctx.answerCallbackQuery({ text: 'Раздел не найден.' });
+  }
+
+  const rows = await getExerciseBaseRows(group, environment);
+  const row = rows.slice(page * BASE_EXERCISE_PAGE_SIZE, (page + 1) * BASE_EXERCISE_PAGE_SIZE)[index];
+  if (!row) return ctx.answerCallbackQuery({ text: 'Упражнение не найдено. Открой страницу заново.' });
+
+  await ctx.answerCallbackQuery();
+  await showExerciseBaseCard(ctx, String(row.id));
+});
+
+bot.callbackQuery(/^program:correct:group:(\d+):(\d+):([^:]+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const programId = Number(ctx.match[1]);
+  const day = Number(ctx.match[2]);
+  const group = correctionGroupFromSlug(ctx.match[3]);
+  if (!group) return ctx.answerCallbackQuery({ text: 'Группа не найдена.' });
+  correctionSessions.set(ctx.from.id,{programId,day,muscleGroup:group});
+  await ctx.answerCallbackQuery();
+  await showCorrectionExercises(ctx,programId,day,group);
+});
+
+bot.callbackQuery(/^program:correct:pick:(\d+):(\d+):(\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const programId = Number(ctx.match[1]);
+  const dayNumber = Number(ctx.match[2]);
+  const index = Number(ctx.match[3]);
+  const session = correctionSessions.get(ctx.from.id);
+  if (!session || session.programId !== programId || session.day !== dayNumber || !session.catalogChoices?.[index]) {
+    return ctx.answerCallbackQuery({ text: 'Список упражнений устарел. Открой коррекцию заново.' });
+  }
+
+  const group = session.muscleGroup ?? '';
+  const exerciseId = session.catalogChoices[index];
+  const existing = pendingCorrections.get(ctx.from.id);
+  const pending: PendingCorrection = existing?.programId === programId && existing.day === dayNumber
+    ? existing
+    : {programId, day: dayNumber, selections: {}};
+
+  pending.selections[group] = exerciseId;
+  pendingCorrections.set(ctx.from.id, pending);
+  await ctx.answerCallbackQuery({ text: 'Выбрано. Программа пока не изменена.' });
+  await showCorrectionGroups(ctx, programId, dayNumber);
+});
+
+bot.callbackQuery(/^program:approve:(\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const id = Number(ctx.match[1]);
+  await pool.query('BEGIN');
+  try {
+    const { rows } = await pool.query('SELECT telegram_user_id FROM training_programs WHERE id=$1', [id]);
+    if (!rows[0]) throw new Error('Program not found');
+    await pool.query(
+      `UPDATE training_programs SET status='archived' WHERE telegram_user_id=$1 AND status='approved' AND id<>$2`,
+      [rows[0].telegram_user_id, id]
+    );
+    await pool.query(`UPDATE training_programs SET status='approved' WHERE id=$1 AND status='draft'`, [id]);
+    await pool.query('COMMIT');
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    throw error;
+  }
+  await ctx.answerCallbackQuery({ text: 'Программа подтверждена.' });
+  await ctx.reply('✅ Текущая версия программы подтверждена.');
+});
+
+bot.callbackQuery('program:history', async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  await ctx.answerCallbackQuery();
+  const rows = await getProgramHistory(selectedClient.get(ctx.from.id) ?? ctx.from.id);
+  if (!rows.length) return ctx.reply('История программ пока пуста.');
+  await ctx.reply('📚 История программ\n\n' + rows.map((r: any) =>
+    `Версия ${r.version} — ${r.status === 'approved' ? 'подтверждена' : r.status === 'archived' ? 'архив' : 'черновик'}\nСоздана: ${new Date(r.created_at).toLocaleString('ru-RU')}${r.correction_request ? `\nКоррекция: ${r.correction_request}` : ''}`
+  ).join('\n\n'));
+});
+
+// Always acknowledge callback queries that are not matched by a handler.
+// This prevents Telegram's loading indicator from hanging on stale/invalid buttons.
+bot.on('callback_query:data', async (ctx) => {
+  console.warn('Unhandled callback query:', ctx.callbackQuery.data);
+  await ctx.answerCallbackQuery({ text: 'Кнопка устарела. Открой раздел заново.' });
+});
+
+bot.catch((error) => console.error('Telegram bot error', error.error));
+
+const server = createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, service: 'pavel-fitness-support' }));
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+});
+
+async function main() {
+  await pool.query('SELECT 1');
+  await ensureDatabase();
+  await seedExerciseLibrary();
+  await syncExerciseCatalog(pool);
+  await syncAnatomyExerciseCatalog(pool);
+  console.log('Using anatomy catalog version:', ANATOMY_CATALOG_VERSION);
+  const integrity = await pool.query(`SELECT
+    (SELECT COUNT(*) FROM trainer_profiles) AS profiles,
+    (SELECT COUNT(*) FROM training_programs) AS programs,
+    (SELECT COUNT(*) FROM exercise_library) AS exercises
+  `);
+  console.log('Database integrity:', integrity.rows[0]);
+  server.listen(PORT, () => console.log(`Health server listening on :${PORT}`));
+  // Render can briefly run the old and new process during a zero-downtime deploy.
+  // Telegram allows only one getUpdates consumer, so serialize polling across instances
+  // with a PostgreSQL session advisory lock. The lock is released automatically if the
+  // process/connection disappears, allowing the replacement instance to take over.
+  telegramPollLock = await pool.connect();
+  while (true) {
+    const { rows } = await telegramPollLock.query<{ locked: boolean }>(
+      'SELECT pg_try_advisory_lock($1) AS locked',
+      [TELEGRAM_POLL_LOCK_KEY]
+    );
+    if (rows[0]?.locked) break;
+    console.log('Another bot instance owns the Telegram polling lock; waiting...');
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  await bot.api.deleteWebhook({ drop_pending_updates: false });
+  console.log('Starting Telegram long polling...');
+  await bot.start({ onStart: (info) => console.log(`Bot @${info.username} started`) });
+}
+
+async function shutdown(signal: string) {
+  console.log(`Received ${signal}; shutting down Telegram polling cleanly...`);
+  try { await bot.stop(); } catch (error) { console.error('Bot stop error', error); }
+  try { server.close(); } catch (error) { console.error('Health server close error', error); }
+  if (telegramPollLock) {
+    try { await telegramPollLock.query('SELECT pg_advisory_unlock($1)', [TELEGRAM_POLL_LOCK_KEY]); } catch (error) { console.error('Poll lock release error', error); }
+    telegramPollLock.release();
+    telegramPollLock = null;
+  }
+  await pool.end();
+  process.exit(0);
+}
+
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
+process.once('SIGINT', () => void shutdown('SIGINT'));
+
+main().catch((error) => {
+  console.error('Fatal startup error', error);
+  process.exit(1);
+});
