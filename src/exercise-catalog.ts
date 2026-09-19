@@ -203,7 +203,7 @@ async function syncAnatomyExerciseCatalog(pool: Pool) {
         ex.muscle, ex.muscle,
         ex.notes,
         'anatomo-training-database',
-        ex.environmentRu, ex.equipmentRu, ex.muscle,
+        ex.muscleGroup, ex.equipmentRu, ex.muscle,
         ex.primaryAction, ANATOMY_CATALOG_VERSION,
         JSON.stringify([
           ex.environment === 'home' ? 'home' : ex.environment === 'outdoor' ? 'outdoor' : 'gym',
