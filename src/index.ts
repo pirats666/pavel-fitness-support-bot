@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { Bot, InlineKeyboard } from 'grammy';
 import pg from 'pg';
 import { syncExerciseCatalog } from './exercise-catalog.js';
+import { createAIWorkoutPlan, aiEnabled, type AIPlannerProfile, type AIExerciseCandidate } from './ai-planner.js';
 
 const { Pool } = pg;
 
@@ -462,7 +463,7 @@ function scoreExercise(row: LibraryExercise, profile: ProfileForProgram, desired
 
 async function getLibraryExercises(profile: ProfileForProgram, version: number): Promise<LibraryExercise[]> {
   const equipmentFilter = profile.location === 'gym' || profile.location === 'mixed'
-    ? `equipment NOT IN ('band','resistance band')`
+    ? `equipment <> ''`
     : `equipment = 'body weight'`;
 
   const { rows } = await pool.query(
@@ -529,13 +530,13 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number):
     .sort((a, b) => b.score - a.score);
 
   for (const row of focusRanked) {
-    if (selected.length >= 12) break;
+    if (selected.length >= 24) break;
     selected.push(row);
     used.add(row.id);
   }
 
   console.log('Program exercise pool:', { focus, selected: selected.length });
-  return selected.slice(0, 12);
+  return selected.slice(0, 24);
 }
 
 function exercisePrescription(row: LibraryExercise, profile: ProfileForProgram, index: number): Exercise {
@@ -752,6 +753,48 @@ function buildExercises(location: string, goal: string, version: number): Exerci
 }
 
 
+function convertAIPlanToProgram(aiPlan: Awaited<ReturnType<typeof createAIWorkoutPlan>>, profile: any, version: number, candidates: LibraryExercise[], correction: string): Program | null {
+  if (!aiPlan) return null;
+  const byId = new Map(candidates.map((e) => [e.id, e]));
+  const days: WorkoutDay[] = aiPlan.days.map((day) => ({
+    day: day.day,
+    title: day.title,
+    focus: day.focus,
+    warmup: day.warmup,
+    exercises: day.exercises.map((item) => {
+      const row = byId.get(item.exerciseId);
+      if (!row) throw new Error(`AI exercise not found in catalog: ${item.exerciseId}`);
+      return {
+        name: row.nameRu || ruExerciseName(row.name),
+        gifUrl: row.gifUrl,
+        sets: item.sets,
+        reps: item.reps,
+        rest: item.rest,
+        comment: item.comment
+      };
+    }),
+    cooldown: day.cooldown
+  }));
+
+  return {
+    title: aiPlan.title || `AI-программа: ${ruGoal(String(profile.goal))}`,
+    goal: ruGoal(String(profile.goal)),
+    frequency: days.length,
+    duration: Number(profile.workout_duration),
+    location: ruLocation(String(profile.location)),
+    version,
+    weeks: 4,
+    progression: aiPlan.progression,
+    days,
+    notes: [
+      `🤖 AI-планировщик: ${aiPlan.format}.`,
+      aiPlan.rationale,
+      ...aiPlan.notes,
+      correction ? `Учтена коррекция: ${correction}` : 'Программа сформирована с учётом профиля клиента и каталога упражнений.'
+    ]
+  };
+}
+
 async function createProgram(userId: number, correction = '') {
   const profile = await getProfile(userId);
   if (!profile) return null;
@@ -760,7 +803,54 @@ async function createProgram(userId: number, correction = '') {
     [userId]
   );
   const version = Number(versionRows[0].next_version);
-  const program = await buildProgram(profile, version, correction);
+
+  let program: Program;
+  if (aiEnabled()) {
+    try {
+      const frequency = Math.min(Math.max(Number(profile.workouts_per_week), 1), 5);
+      const aiCandidates = await getLibraryExercises({
+        goal: String(profile.goal),
+        experience: String(profile.experience),
+        location: String(profile.location),
+        workouts_per_week: frequency,
+        workout_duration: Number(profile.workout_duration),
+        limitations: String(profile.limitations ?? ''),
+        training_focus: String(profile.training_focus ?? 'auto')
+      }, version);
+
+      const aiProfile: AIPlannerProfile = {
+        goal: String(profile.goal),
+        experience: String(profile.experience),
+        location: String(profile.location),
+        workoutsPerWeek: frequency,
+        workoutDuration: Number(profile.workout_duration),
+        limitations: String(profile.limitations ?? ''),
+        trainingFocus: String(profile.training_focus ?? 'auto')
+      };
+
+      const candidates: AIExerciseCandidate[] = aiCandidates.map((e) => ({
+        id: e.id,
+        nameRu: e.nameRu || ruExerciseName(e.name),
+        bodyPartRu: e.bodyPartRu,
+        equipmentRu: e.equipmentRu,
+        muscleGroupRu: e.muscleGroupRu,
+        trainingTypes: e.trainingTypes,
+        movementPattern: e.movementPattern,
+        level: e.level,
+        instructionsRu: e.instructionsRu
+      }));
+
+      const aiPlan = await createAIWorkoutPlan(aiProfile, candidates, correction);
+      program = convertAIPlanToProgram(aiPlan, profile, version, aiCandidates, correction) ?? await buildProgram(profile, version, correction);
+      console.log('AI program created', { userId, version, format: aiPlan?.format ?? 'fallback' });
+    } catch (error) {
+      console.error('AI program failed; using deterministic planner', error);
+      program = await buildProgram(profile, version, correction);
+    }
+  } else {
+    program = await buildProgram(profile, version, correction);
+  }
+
   const { rows } = await pool.query(
     `INSERT INTO training_programs (telegram_user_id, version, status, program, correction_request)
      VALUES ($1,$2,'draft',$3::jsonb,$4) RETURNING id, version`,
@@ -1497,293 +1587,4 @@ bot.callbackQuery(/^goal:(.+)$/, async (ctx) => {
   await ctx.editMessageText('Шаг 2/6. Опыт тренировок?', {
     reply_markup: new InlineKeyboard().text('Новичок', 'exp:beginner').text('До 1 года', 'exp:under1').row().text('1–3 года', 'exp:1to3').text('3+ года', 'exp:3plus')
   });
-});
-
-bot.callbackQuery(/^exp:(.+)$/, async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const session = sessions.get(ctx.from.id);
-  if (!session) return startQuiz(ctx);
-  session.experience = ctx.match[1];
-  session.step = 'location';
-  await ctx.answerCallbackQuery();
-  await ctx.editMessageText('Шаг 3/6. Где будут проходить тренировки?', {
-    reply_markup: new InlineKeyboard().text('Зал', 'loc:gym').text('Дом', 'loc:home').row().text('Улица', 'loc:outdoor').text('Смешанный формат', 'loc:mixed')
-  });
-});
-
-bot.callbackQuery(/^loc:(.+)$/, async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const session = sessions.get(ctx.from.id);
-  if (!session) return startQuiz(ctx);
-  session.location = ctx.match[1];
-  session.step = 'workouts';
-  await ctx.answerCallbackQuery();
-  await ctx.editMessageText('Шаг 4/6. Сколько тренировок в неделю?', {
-    reply_markup: new InlineKeyboard().text('1', 'wk:1').text('2', 'wk:2').text('3', 'wk:3').row().text('4', 'wk:4').text('5+', 'wk:5')
-  });
-});
-
-bot.callbackQuery(/^wk:(\d+)$/, async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const session = sessions.get(ctx.from.id);
-  if (!session) return startQuiz(ctx);
-  session.workoutsPerWeek = Number(ctx.match[1]);
-  session.step = 'duration';
-  await ctx.answerCallbackQuery();
-  await ctx.editMessageText('Шаг 5/6. Сколько минут на одну тренировку?', {
-    reply_markup: new InlineKeyboard().text('30', 'dur:30').text('45', 'dur:45').text('60', 'dur:60').row().text('75', 'dur:75').text('90', 'dur:90')
-  });
-});
-
-bot.callbackQuery(/^dur:(\d+)$/, async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const session = sessions.get(ctx.from.id);
-  if (!session) return startQuiz(ctx);
-  session.workoutDuration = Number(ctx.match[1]);
-  session.step = 'limitations';
-  await ctx.answerCallbackQuery();
-  await ctx.editMessageText('Шаг 6/6. Есть ограничения или особенности? Напиши их одним сообщением. Если нет — напиши «нет».');
-});
-
-bot.on('message:text', async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return;
-  const addSession = clientAddSessions.get(ctx.from.id);
-  if (addSession) {
-    const raw = ctx.message.text.trim();
-    if (addSession.step === 'username') {
-      const username = raw.replace(/^@/, '').trim().toLowerCase();
-      if (!/^[a-z0-9_]{5,32}$/.test(username)) return ctx.reply('Введи корректный Telegram username, например @ivan_fit.');
-      const existing = await pool.query('SELECT id FROM clients WHERE LOWER(telegram_username)=$1', [username]);
-      if (existing.rows[0]) return ctx.reply('Такой клиент уже есть в базе. Открой «Клиенты» и выбери его.');
-      addSession.username = username;
-      addSession.step = 'name';
-      return ctx.reply('👤 Теперь введи имя клиента. Например: Иван');
-    }
-    if (addSession.step === 'name') {
-      addSession.firstName = raw || 'Клиент';
-      const name = addSession.firstName;
-      const clientRow = await pool.query(
-        'INSERT INTO clients (telegram_username, first_name) VALUES ($1,$2) RETURNING id',
-        [addSession.username, name]
-      );
-      const clientId = Number(clientRow.rows[0].id);
-      const internalId = -clientId;
-    await pool.query(
-      "INSERT INTO trainer_profiles (telegram_user_id, telegram_username, first_name, goal, experience, location, workouts_per_week, workout_duration, limitations) VALUES ($1,$2,$3,'health','beginner','gym',1,60,'')",
-      [internalId, addSession.username, name]
-    );
-    clientAddSessions.delete(ctx.from.id);
-    clientSearchSessions.delete(ctx.from.id);
-    selectedClient.set(ctx.from.id, internalId);
-    return ctx.reply(`✅ <b>Клиент добавлен</b>
-
-👤 ${name}
-🔗 @${addSession.username}
-
-Теперь клиент выбран. <b>Анкету заполняешь ты</b> — клиенту ничего делать не нужно.`, {
-      parse_mode: 'HTML',
-      reply_markup: new InlineKeyboard()
-        .text('📝 Заполнить анкету', 'client:quiz')
-        .row()
-        .text('📐 Замеры', 'client:measurements')
-        .row()
-        .text('💳 Оплата', 'client:payment')
-        .row()
-        .text('🏋️ Программа', 'client:program')
-        .row()
-        .text('⬅️ Клиенты', 'admin:profiles')
-    });
-    }
-  }
-  const searchSession = clientSearchSessions.get(ctx.from.id);
-  if (searchSession) {
-    const query = ctx.message.text.trim();
-    clientSearchSessions.delete(ctx.from.id);
-    const profiles = await searchClients(query);
-    if (!profiles.length) {
-      return ctx.reply(`🔎 По запросу «${query}» ничего не найдено.`, {
-        reply_markup: new InlineKeyboard().text('🔎 Попробовать снова', 'admin:search').row().text('⬅️ Админ-панель', 'admin:open')
-      });
-    }
-    const text = profiles.map((p: any, i: number) => clientSummary(p, i + 1)).join('\n\n');
-    const keyboard = new InlineKeyboard();
-    profiles.slice(0, 20).forEach((p: any, i: number) => {
-      keyboard.text(`${i + 1}. ${(p.telegram_username ? '@' + p.telegram_username : p.first_name || 'Клиент').slice(0, 28)}`, `client:select:${p.client_id}`).row();
-    });
-    keyboard.text('🔎 Новый поиск', 'admin:search').row().text('⬅️ Клиенты', 'admin:profiles');
-    return ctx.reply(`🔎 <b>Результаты поиска</b>
-
-${text}
-
-Нажми на нужного клиента — все дальнейшие действия будут выполняться для него.`, {
-      parse_mode: 'HTML',
-      reply_markup: keyboard
-    });
-  }
-
-  const measurement = measurementSessions.get(ctx.from.id);
-  if (measurement) {
-    const parts = ctx.message.text.split(',').map((v) => v.trim());
-    if (parts.length < 7) return ctx.reply('Нужно 7 значений через запятую: вес, грудь, талия, бёдра, рука, бедро, % жира.');
-    const nums = parts.slice(0, 7).map((v) => v === '-' || v === '' ? null : Number(v.replace(',', '.')));
-    if (nums.some((v) => v !== null && (!Number.isFinite(v) || v < 0))) return ctx.reply('Проверь значения замеров. Используй числа или «-».');
-    const [weight, chest, waist, hips, arm, thigh, bodyFat] = nums;
-    await pool.query(
-      'INSERT INTO measurements (telegram_user_id, weight_kg, chest_cm, waist_cm, hips_cm, arm_cm, thigh_cm, body_fat_pct) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
-      [measurement.targetId, weight, chest, waist, hips, arm, thigh, bodyFat]
-    );
-    measurementSessions.delete(ctx.from.id);
-    await ctx.reply('✅ Замеры сохранены для выбранного клиента.', {
-      reply_markup: new InlineKeyboard().text('📐 Открыть замеры', 'client:measurements').row().text('⬅️ Карточка клиента', 'admin:profiles')
-    });
-    return;
-  }
-
-  const payment = paymentSessions.get(ctx.from.id);
-  if (payment) {
-    const rawText = ctx.message.text.trim();
-    const value = Number(rawText.replace(',', '.'));
-    if (payment.step === 'amount') {
-      payment.amount = value;
-      payment.step = 'total';
-      return ctx.reply('🏋️ Сколько тренировок оплачено? Например: 12');
-    }
-    if (payment.step === 'total') {
-      if (!Number.isInteger(value)) return ctx.reply('Количество тренировок должно быть целым числом.');
-      payment.total = value;
-      payment.step = 'remaining';
-      return ctx.reply('⏳ Сколько тренировок осталось? Например: 10');
-    }
-    if (!Number.isInteger(value) || value > (payment.total ?? 0)) return ctx.reply('Остаток должен быть целым числом и не больше общего количества тренировок.');
-    const amount = payment.amount ?? 0;
-    const total = payment.total ?? 0;
-    const targetId = payment.targetId ?? selectedClient.get(ctx.from.id) ?? ctx.from.id;
-    await updatePaymentInfo(targetId, amount, total, value);
-    await pool.query(
-      'INSERT INTO payment_history (telegram_user_id, type, amount, sessions, remaining, note) VALUES ($1,\'payment\',$2,$3,$4,\'Изменение оплаты и пакета тренировок\')',
-      [targetId, amount, total, value]
-    );
-    paymentSessions.delete(ctx.from.id);
-    await ctx.reply('✅ Данные по оплате и тренировкам сохранены.');
-    return sendPaymentPanel(ctx, targetId);
-  }
-
-  const correction = correctionSessions.get(ctx.from.id);
-  if (correction) {
-    const request = ctx.message.text.trim();
-    correctionSessions.delete(ctx.from.id);
-    const created = await createProgram(selectedClient.get(ctx.from.id) ?? ctx.from.id, request);
-    if (!created) return ctx.reply('Сначала заполните профиль.');
-    await ctx.reply(`Готово. Создана версия ${created.version} с учётом коррекции:\n«${escapeHtml(request)}»`, { parse_mode: 'HTML' });
-    return sendProgramMedia(ctx, created.program, programKeyboard(created.id));
-  }
-
-  const session = sessions.get(ctx.from.id);
-  if (!session || session.step !== 'limitations') return;
-  const limitations = ctx.message.text.trim();
-  try {
-    const targetId = quizTargets.get(ctx.from.id) ?? ctx.from.id;
-    clientSearchSessions.delete(ctx.from.id);
-    const existingTarget = await getProfile(targetId);
-    await saveProfile({
-      id: targetId,
-      username: existingTarget?.telegram_username ?? (targetId === ctx.from.id ? ctx.from.username : undefined),
-      firstName: existingTarget?.first_name ?? (targetId === ctx.from.id ? ctx.from.first_name : undefined)
-    }, { ...session, limitations });
-    sessions.delete(ctx.from.id);
-    quizTargets.delete(ctx.from.id);
-    const created = await createProgram(targetId);
-    if (!created) return ctx.reply('Профиль сохранён, но программу создать не удалось.');
-    await ctx.reply('Профиль сохранён ✅\n\nПрограмма составлена автоматически. Ниже — первая версия.');
-    const targetProfile = await getProfile(targetId);
-    await sendProgramMedia(ctx, created.program, programKeyboard(created.id));
-  } catch (error) {
-    console.error('save profile/program error', error);
-    const message = String((error as any)?.message ?? '');
-    if (/can't parse entities|Bad Request/i.test(message)) {
-      await ctx.reply('⚠️ Программа сохранена, но Telegram не принял формат сообщения. Исправление уже внесено — повтори создание программы.');
-    } else {
-      await ctx.reply('Не удалось сохранить профиль или программу. Проверь подключение базы данных.');
-    }
-  }
-});
-
-bot.callbackQuery(/^program:correct:(\d+)$/, async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const programId = Number(ctx.match[1]);
-  correctionSessions.set(ctx.from.id, { programId });
-  await ctx.answerCallbackQuery();
-  await ctx.reply('🔄 Что изменить в программе? Напиши одним сообщением. Например: «сделать легче», «сделать интенсивнее», «заменить упражнения на домашние», «уменьшить объём».');
-});
-
-bot.callbackQuery(/^program:approve:(\d+)$/, async (ctx) => {
-  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const id = Number(ctx.match[1]);
-  await pool.query('BEGIN');
-  try {
-    const { rows } = await pool.query('SELECT telegram_user_id FROM training_programs WHERE id=$1', [id]);
-    if (!rows[0]) throw new Error('Program not found');
-    await pool.query(
-      `UPDATE training_programs SET status='archived' WHERE telegram_user_id=$1 AND status='approved' AND id<>$2`,
-      [rows[0].telegram_user_id, id]
-    );
-    await pool.query(`UPDATE training_programs SET status='approved' WHERE id=$1 AND status='draft'`, [id]);
-    await pool.query('COMMIT');
-  } catch (error) {
-    await pool.query('ROLLBACK');
-    throw error;
-  }
-  await ctx.answerCallbackQuery({ text: 'Программа подтверждена.' });
-  await ctx.reply('✅ Текущая версия программы подтверждена.');
-});
-
-bot.callbackQuery('program:history', async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  await ctx.answerCallbackQuery();
-  const rows = await getProgramHistory(selectedClient.get(ctx.from.id) ?? ctx.from.id);
-  if (!rows.length) return ctx.reply('История программ пока пуста.');
-  await ctx.reply('📚 История программ\n\n' + rows.map((r: any) =>
-    `Версия ${r.version} — ${r.status === 'approved' ? 'подтверждена' : r.status === 'archived' ? 'архив' : 'черновик'}\nСоздана: ${new Date(r.created_at).toLocaleString('ru-RU')}${r.correction_request ? `\nКоррекция: ${r.correction_request}` : ''}`
-  ).join('\n\n'));
-});
-
-// Always acknowledge callback queries that are not matched by a handler.
-// This prevents Telegram's loading indicator from hanging on stale/invalid buttons.
-bot.on('callback_query:data', async (ctx) => {
-  console.warn('Unhandled callback query:', ctx.callbackQuery.data);
-  await ctx.answerCallbackQuery({ text: 'Кнопка устарела. Открой раздел заново.' });
-});
-
-bot.catch((error) => console.error('Telegram bot error', error.error));
-
-const server = createServer((req, res) => {
-  if (req.url === '/health') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, service: 'pavel-fitness-support' }));
-    return;
-  }
-  res.writeHead(404);
-  res.end();
-});
-
-async function main() {
-  await pool.query('SELECT 1');
-  await ensureDatabase();
-  await seedExerciseLibrary();
-  await syncExerciseCatalog(pool);
-  const integrity = await pool.query(`SELECT
-    (SELECT COUNT(*) FROM trainer_profiles) AS profiles,
-    (SELECT COUNT(*) FROM training_programs) AS programs,
-    (SELECT COUNT(*) FROM exercise_library) AS exercises
-  `);
-  console.log('Database integrity:', integrity.rows[0]);
-  server.listen(PORT, () => console.log(`Health server listening on :${PORT}`));
-  await bot.api.deleteWebhook({ drop_pending_updates: false });
-  console.log('Starting Telegram long polling...');
-  await bot.start({ onStart: (info) => console.log(`Bot @${info.username} started`) });
-}
-
-main().catch((error) => {
-  console.error('Fatal startup error', error);
-  process.exit(1);
 });
