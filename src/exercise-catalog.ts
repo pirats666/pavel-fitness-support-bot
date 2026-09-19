@@ -181,7 +181,7 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
   // The workbook is the source of truth for the program generator.
   // Remove the previous generated anatomy catalog so stale exercises cannot leak
   // into new programs or correction choices.
-  await pool.query(`DELETE FROM exercise_library WHERE id NOT LIKE 'base-%'`);
+  await pool.query(`DELETE FROM exercise_library`);
   await pool.query(`UPDATE exercise_library SET gif_url='', image_url='', gif_verified=FALSE`);
 
   for (const ex of ANATOMY_EXERCISES) {
@@ -202,7 +202,15 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
          gif_url,image_url,name_ru,body_part_ru,equipment_ru,muscle_group_ru,training_types,movement_pattern,level,
          catalog_version,training_contexts,gif_verified)
        VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,$9,$10,$2,$11,$12,$13,$14::jsonb,$15,$16,$17,$18::jsonb ,$19)
-       ON CONFLICT (id) DO NOTHING`,
+       ON CONFLICT (id) DO UPDATE SET
+         name=EXCLUDED.name, category=EXCLUDED.category, equipment=EXCLUDED.equipment, target=EXCLUDED.target,
+         muscle_group=EXCLUDED.muscle_group, secondary_muscles=EXCLUDED.secondary_muscles,
+         instructions_ru=EXCLUDED.instructions_ru, source_url=EXCLUDED.source_url, gif_url=EXCLUDED.gif_url,
+         image_url=EXCLUDED.image_url, name_ru=EXCLUDED.name_ru, body_part_ru=EXCLUDED.body_part_ru,
+         equipment_ru=EXCLUDED.equipment_ru, muscle_group_ru=EXCLUDED.muscle_group_ru,
+         training_types=EXCLUDED.training_types, movement_pattern=EXCLUDED.movement_pattern,
+         level=EXCLUDED.level, catalog_version=EXCLUDED.catalog_version,
+         training_contexts=EXCLUDED.training_contexts, gif_verified=EXCLUDED.gif_verified`,
       [
         ex.id,
         ex.name,
