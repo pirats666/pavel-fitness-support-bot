@@ -1194,7 +1194,7 @@ async function sendProgramMedia(ctx: any, program: Program, replyMarkup?: Inline
       ].join('\n');
 
       await sendProgramText(ctx, exerciseText);
-
+    }
 
     await sendProgramText(ctx, [
       '',
