@@ -757,86 +757,61 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
       ));
     }
   } else if (frequency === 3) {
-    // 3 days: Chest + Arms / Back + Shoulders / Legs.
     resetDaySelection();
-    const day1 = [
+    days.push(makeDay(1, 'День 1 — Грудь + руки', 'Грудь + руки', [
       ...take(2, byGroup('Грудь'), priority),
-      ...take(1, byTarget('Руки', /бицепс|biceps/), priority),
-      ...take(1, byTarget('Руки', /трицепс|triceps/), priority)
-    ];
-    days.push(makeDay(1, 'День 1 — Грудь + руки', 'Грудь + руки', day1));
-
+      ...take(2, byTarget('Руки', /бицепс|biceps|трицепс|triceps/), priority)
+    ].slice(0, 4)));
     resetDaySelection();
-    const day2 = [
+    days.push(makeDay(2, 'День 2 — Спина + плечи', 'Спина + плечи', [
       ...take(3, byGroup('Спина'), priority),
-      ...take(2, byGroup('Плечи'), priority)
-    ];
-    days.push(makeDay(2, 'День 2 — Спина + плечи', 'Спина + плечи', day2.slice(0, 5)));
-
+      ...take(3, byGroup('Плечи'), priority)
+    ].slice(0, 6)));
     resetDaySelection();
-    const day3 = [
+    days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', [
       ...take(2, byTarget('Ноги', /квадрицепс|quadriceps|quad/), priority),
       ...take(1, byTarget('Ноги', /ягодич|glute/), priority),
       ...take(1, byTarget('Ноги', /задняя поверхность бедра|hamstring/), priority),
       ...take(1, byGroup('Голень'), priority),
       ...take(1, byGroup('Кор'), priority)
-    ];
-    days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', day3.slice(0, 6)));
+    ].slice(0, 6)));
   } else if (frequency === 4) {
-    // 4 days: Chest / Back / Legs / Arms + Shoulders.
-    resetDaySelection();
-    const chest = [
-      ...take(3, byGroup('Грудь'), priority),
-      ...take(3, byGroup('Грудь'), priority)
-    ];
-    days.push(makeDay(1, 'День 1 — Грудь', 'Грудь', chest.slice(0, 6)));
-
-    resetDaySelection();
-    const back = take(6, byGroup('Спина'), priority);
-    days.push(makeDay(2, 'День 2 — Спина', 'Спина', back.slice(0, 6)));
-
-    resetDaySelection();
-    const legs = [
-      ...take(2, byTarget('Ноги', /квадрицепс|quadriceps|quad/), priority),
-      ...take(1, byTarget('Ноги', /ягодич|glute/), priority),
-      ...take(1, byTarget('Ноги', /задняя поверхность бедра|hamstring/), priority),
-      ...take(1, byGroup('Голень'), priority),
-      ...take(1, byGroup('Кор'), priority)
-    ];
-    days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', legs.slice(0, 6)));
-
-    resetDaySelection();
-    const armsShoulders = [
-      ...take(2, byTarget('Руки', /бицепс|biceps/), priority),
-      ...take(2, byTarget('Руки', /трицепс|triceps/), priority),
-      ...take(1, byGroup('Плечи'), priority),
-      ...take(1, byGroup('Плечи'), priority)
-    ];
-    days.push(makeDay(4, 'День 4 — Руки + плечи', 'Руки + плечи', armsShoulders.slice(0, 6)));
-  } else {
-    // 5 days: Chest / Back / Legs / Arms / Shoulders.
     resetDaySelection();
     days.push(makeDay(1, 'День 1 — Грудь', 'Грудь', take(6, byGroup('Грудь'), priority).slice(0, 6)));
-
     resetDaySelection();
     days.push(makeDay(2, 'День 2 — Спина', 'Спина', take(6, byGroup('Спина'), priority).slice(0, 6)));
-
     resetDaySelection();
-    const legs = [
+    days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', [
       ...take(2, byTarget('Ноги', /квадрицепс|quadriceps|quad/), priority),
       ...take(1, byTarget('Ноги', /ягодич|glute/), priority),
       ...take(1, byTarget('Ноги', /задняя поверхность бедра|hamstring/), priority),
       ...take(1, byGroup('Голень'), priority),
       ...take(1, byGroup('Кор'), priority)
-    ];
-    days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', legs.slice(0, 6)));
-
+    ].slice(0, 6)));
+    resetDaySelection();
+    days.push(makeDay(4, 'День 4 — Руки + плечи', 'Руки + плечи', [
+      ...take(2, byTarget('Руки', /бицепс|biceps/), priority),
+      ...take(2, byTarget('Руки', /трицепс|triceps/), priority),
+      ...take(2, byGroup('Плечи'), priority)
+    ].slice(0, 6)));
+  } else {
+    resetDaySelection();
+    days.push(makeDay(1, 'День 1 — Грудь', 'Грудь', take(6, byGroup('Грудь'), priority).slice(0, 6)));
+    resetDaySelection();
+    days.push(makeDay(2, 'День 2 — Спина', 'Спина', take(6, byGroup('Спина'), priority).slice(0, 6)));
+    resetDaySelection();
+    days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', [
+      ...take(2, byTarget('Ноги', /квадрицепс|quadriceps|quad/), priority),
+      ...take(1, byTarget('Ноги', /ягодич|glute/), priority),
+      ...take(1, byTarget('Ноги', /задняя поверхность бедра|hamstring/), priority),
+      ...take(1, byGroup('Голень'), priority),
+      ...take(1, byGroup('Кор'), priority)
+    ].slice(0, 6)));
     resetDaySelection();
     days.push(makeDay(4, 'День 4 — Руки', 'Руки', [
       ...take(3, byTarget('Руки', /бицепс|biceps/), priority),
       ...take(3, byTarget('Руки', /трицепс|triceps/), priority)
     ].slice(0, 6)));
-
     resetDaySelection();
     days.push(makeDay(5, 'День 5 — Плечи', 'Плечи', take(6, byGroup('Плечи'), priority).slice(0, 6)));
   }
@@ -978,3 +953,553 @@ function convertAIPlanToProgram(aiPlan: Awaited<ReturnType<typeof createAIWorkou
         id: row.id,
         muscleGroup: row.bodyPartRu || row.muscleGroupRu,
         movementPattern: row.movementPattern,
+        name: row.nameRu || ruExerciseName(row.name),
+        gifUrl: row.gifUrl,
+        sets: item.sets,
+        reps: item.reps,
+        rest: item.rest,
+        progression: aiPlan.progression,
+        recommendation: item.comment,
+        comment: item.comment
+      };
+    }),
+    cooldown: day.cooldown
+  }));
+
+  return {
+    title: aiPlan.title || `AI-программа: ${ruGoal(String(profile.goal))}`,
+    goal: ruGoal(String(profile.goal)),
+    frequency: days.length,
+    duration: Number(profile.workout_duration),
+    location: ruLocation(String(profile.location)),
+    version,
+    weeks: 4,
+    progression: aiPlan.progression,
+    days,
+    notes: [
+      `🤖 AI-планировщик: ${aiPlan.format}.`,
+      aiPlan.rationale,
+      ...aiPlan.notes,
+      correction ? `Учтена коррекция: ${correction}` : 'Программа сформирована с учётом профиля клиента и каталога упражнений.'
+    ]
+  };
+}
+
+async function createProgram(userId: number, correction = '') {
+  const profile = await getProfile(userId);
+  if (!profile) return null;
+  const { rows: versionRows } = await pool.query(
+    'SELECT COALESCE(MAX(version), 0) + 1 AS next_version FROM training_programs WHERE telegram_user_id = $1',
+    [userId]
+  );
+  const version = Number(versionRows[0].next_version);
+
+  // The workbook is authoritative. AI is not allowed to substitute exercises,
+  // invent movements, or change the fixed split.
+  const program = await buildProgram(profile, version, correction);
+  console.log('Program planning completed', { userId, version, source: 'training-workbook' });
+
+  const { rows } = await pool.query(
+    `INSERT INTO training_programs (telegram_user_id, version, status, program, correction_request)
+     VALUES ($1,$2,'draft',$3::jsonb,$4) RETURNING id, version`,
+    [userId, version, JSON.stringify(program), correction]
+  );
+  return { id: Number(rows[0].id), version, program };
+}
+
+async function getCurrentProgram(userId: number) {
+  const { rows } = await pool.query(
+    `SELECT id, version, status, program, correction_request, created_at
+     FROM training_programs WHERE telegram_user_id = $1
+     ORDER BY version DESC LIMIT 1`,
+    [userId]
+  );
+  return rows[0] ?? null;
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function resolveGifUrl(gifUrl?: string) {
+  if (!gifUrl) return '';
+  if (/^https?:\/\//i.test(gifUrl)) return gifUrl;
+  return 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/' + gifUrl.replace(/^\/+/, '');
+}
+
+function stripHtml(value: string) {
+  return value
+    .replace(/<[^>]*>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
+}
+
+async function sendProgramText(ctx: any, text: string, replyMarkup?: InlineKeyboard) {
+  // Telegram allows up to 4096 characters in a text message. Keep a safe margin
+  // and split on real newlines so we never cut an HTML tag in half.
+  const limit = 3500;
+  const chunks: string[] = [];
+  let current = '';
+
+  for (const line of text.split('\n')) {
+    // A single generated line can theoretically be longer than the safe limit.
+    // Split that line without ever breaking an HTML tag.
+    if (line.length > limit) {
+      if (current) {
+        chunks.push(current);
+        current = '';
+      }
+      let rest = line;
+      while (rest.length > limit) {
+        let cut = rest.lastIndexOf(' ', limit);
+        if (cut < 1) cut = limit;
+        chunks.push(rest.slice(0, cut));
+        rest = rest.slice(cut).trimStart();
+      }
+      if (rest) current = rest;
+      continue;
+    }
+
+    const candidate = current ? current + '\n' + line : line;
+    if (current && candidate.length > limit) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current) chunks.push(current);
+
+  for (let i = 0; i < chunks.length; i++) {
+    const options = i === chunks.length - 1 && replyMarkup
+      ? { reply_markup: replyMarkup }
+      : {};
+
+    try {
+      await ctx.reply(chunks[i], { ...options, parse_mode: 'HTML' as const });
+    } catch (error) {
+      const message = String((error as any)?.message ?? '');
+      if (!/can't parse entities|cannot parse entities|Bad Request/i.test(message)) {
+        throw error;
+      }
+
+      // Formatting must never prevent delivery of a saved program.
+      // If Telegram rejects HTML, resend the exact chunk as plain text.
+      console.warn('Telegram rejected program HTML; retrying plain text', { chunk: i + 1, error });
+      await ctx.reply(stripHtml(chunks[i]), options);
+    }
+  }
+}
+
+async function sendProgramMedia(ctx: any, program: Program, replyMarkup?: InlineKeyboard) {
+  await sendProgramText(ctx, [
+    `🏋️ <b>${escapeHtml(program.title)}</b>`,
+    `🎯 Цель: ${escapeHtml(program.goal)}`,
+    `📍 Формат: ${escapeHtml(program.location)}`,
+    `📅 График: ${program.frequency} тренировок/неделю`,
+    `⏱ Длительность: ${program.duration} мин`,
+    '',
+    `📈 <b>Прогрессия</b>`,
+    escapeHtml(program.progression)
+  ].join('\n'));
+
+  for (const day of program.days) {
+    await sendProgramText(ctx, [
+      '━━━━━━━━━━━━━━━━━━',
+      `🏋️ <b>ДЕНЬ ${day.day}</b>`,
+      `🎯 <b>${escapeHtml(day.focus)}</b>`,
+      '',
+      '🔥 <b>РАЗМИНКА</b>',
+      escapeHtml(day.warmup),
+      '',
+      '💪 <b>УПРАЖНЕНИЯ</b>'
+    ].join('\n'));
+
+    for (let i = 0; i < day.exercises.length; i++) {
+      const exercise = day.exercises[i];
+      const exerciseText = [
+        `<b>${i + 1}. ${escapeHtml(exercise.name)}</b>`,
+        `Подходы: ${exercise.sets}`,
+        `Повторения: ${escapeHtml(exercise.reps)}`,
+        `Отдых: ${escapeHtml(exercise.rest)}`
+      ].join('\n');
+
+      await sendProgramText(ctx, exerciseText);
+
+      const url = resolveGifUrl(exercise.gifUrl);
+      if (url) {
+        try {
+          await ctx.replyWithAnimation(url, {
+            caption: `<b>${i + 1}. ${escapeHtml(exercise.name)}</b>`,
+            parse_mode: 'HTML'
+          });
+        } catch (error) {
+          console.error('exercise gif send failed', { name: exercise.name, url, error });
+        }
+      } else {
+        console.warn('exercise has no GIF', { name: exercise.name });
+      }
+    }
+
+    await sendProgramText(ctx, [
+      '',
+      '🧘 <b>ЗАМИНКА</b>',
+      escapeHtml(day.cooldown)
+    ].join('\n'));
+  }
+
+  await sendProgramText(ctx, [
+    '━━━━━━━━━━━━━━━━━━',
+    '📝 <b>ПРИМЕЧАНИЯ</b>',
+    ...program.notes.map((note) => '• ' + escapeHtml(note))
+  ].join('\n'), replyMarkup);
+}
+function programText(program: Program) {
+  const parts = [
+    `🏋️ <b>${escapeHtml(program.title)}</b>`,
+    '',
+    '📌 <b>Параметры программы</b>',
+    `🎯 Цель: <b>${escapeHtml(program.goal)}</b>`,
+    `📍 Формат: <b>${escapeHtml(program.location)}</b>`,
+    `📅 График: <b>${program.frequency} тренировки/неделю</b>`,
+    `⏱ Длительность: <b>${program.duration} мин</b>`,
+    '',
+    '━━━━━━━━━━━━━━',
+    '',
+    '📈 <b>Прогрессия</b>',
+    escapeHtml(program.progression),
+    ''
+  ];
+
+  for (const day of program.days) {
+    parts.push(
+      '',
+      '━━━━━━━━━━━━━━',
+      '',
+      `🏋️ <b>${escapeHtml(day.title)}</b>`,
+      `🎯 Фокус: <b>${escapeHtml(day.focus)}</b>`,
+      '',
+      '🔥 <b>Разминка</b>',
+      escapeHtml(day.warmup),
+      '',
+      '💪 <b>Упражнения</b>',
+      ''
+    );
+
+    day.exercises.forEach((e, i) => {
+      parts.push(
+        `<b>${i + 1}. ${escapeHtml(e.name)}</b>`,
+        `   Подходы: <b>${e.sets}</b>   Повторения: <b>${escapeHtml(e.reps)}</b>`,
+        `   Отдых: <b>${escapeHtml(e.rest)}</b>`,
+        `   📊 Количество: <b>${e.sets} × ${escapeHtml(e.reps)}</b>`,
+        e.progression ? `   📈 Прогрессия: ${escapeHtml(e.progression)}` : '',
+        e.recommendation ? `   💡 Рекомендация: ${escapeHtml(e.recommendation)}` : (e.comment ? `   💡 ${escapeHtml(e.comment)}` : ''),
+        ''
+      );
+    });
+
+    parts.push(
+      `🧘 <b>Заминка</b>`,
+      escapeHtml(day.cooldown),
+      ''
+    );
+  }
+
+  parts.push(
+    '',
+    '━━━━━━━━━━━━━━',
+    '',
+    '📝 <b>Важные примечания</b>',
+    '',
+    ...program.notes.map((note) => `• ${escapeHtml(note)}`)
+  );
+
+  return parts.join('\n');
+}
+
+function exerciseMuscleGroup(name: string, focus = '') {
+  const text = normalizeText(name);
+  const focusText = normalizeText(focus);
+
+  // UI-level groups intentionally differ from the detailed anatomy taxonomy:
+  // Бицепс + трицепс + плечевая мышца = Руки.
+  // Квадрицепс + задняя поверхность бедра + ягодицы + икры + приводящие = Ноги.
+  if (/(груд|жим.*леж|жим.*наклон|отжим|кроссовер|сведен.*груд|pec deck|chest fly)/.test(text)) {
+    return 'Грудь';
+  }
+
+  if (/(широч|спин|подтяг|пуловер|ромб|трапец|тяга.*верхн|тяга.*гориз|тяга.*пояс|тяга.*гантел|тяга.*штанг)/.test(text)) {
+    return 'Спина';
+  }
+
+  if (/(плеч|дельт|разведен.*сторон|жим.*над.*голов|жим.*плеч|задн.*дельт|мах.*сторон)/.test(text)) {
+    return 'Плечи';
+  }
+
+  // All arm musculature is one correction group.
+  if (/(бицеп|трицеп|плечев.*мышц|сгибан.*рук|разгибан.*рук|молот|hammer curl|curl|triceps|француз)/.test(text)) {
+    return 'Руки';
+  }
+
+  // All lower-body musculature is one correction group.
+  if (/(квадриц|присед|выпад|жим ног|разгибан.*ног|сгибан.*ног|зашаг|step[- ]?up|ягод|hip thrust|glute bridge|отведен.*бедр|румын|станов|good morning|бицепс бедр|задн.*поверх.*бедр|икр|голен|носк|приводящ)/.test(text)) {
+    return 'Ноги';
+  }
+
+  if (/(пресс|живот|скручив|планк|dead bug|dead bug|кор|pallof|anti[- ]rotation|rotation|подъем.*ног)/.test(text)) {
+    return 'Кор';
+  }
+
+  if (/(зубчат|лопат|вращательн.*манжет|манжет.*плеч)/.test(text)) {
+    return 'Плечевой пояс';
+  }
+
+  // If the exercise name is generic, use the day focus only as a last resort.
+  if (focusText.includes('груд')) return 'Грудь';
+  if (focusText.includes('спин')) return 'Спина';
+  if (focusText.includes('плеч')) return 'Плечи';
+  if (focusText.includes('рук')) return 'Руки';
+  if (focusText.includes('ног')) return 'Ноги';
+  if (focusText.includes('кор')) return 'Кор';
+
+  return 'Другое';
+}
+
+function correctionCategorySet(group: string) {
+  if (group === 'Грудь') return new Set(['chest']);
+  if (group === 'Спина') return new Set(['back']);
+  if (group === 'Плечи') return new Set(['shoulders']);
+  if (group === 'Руки') return new Set(['upper arms','lower arms']);
+  if (group === 'Ноги') return new Set(['upper legs','lower legs']);
+  if (group === 'Кор') return new Set(['waist']);
+  return new Set<string>();
+}
+
+function correctionGroupsForDay(program: Program, dayNumber: number) {
+  const day = program.days.find((d) => d.day === dayNumber);
+  if (!day) return [];
+  const groups = new Set<string>();
+  for (const exercise of day.exercises) {
+    const group = exerciseMuscleGroup(exercise.name, day.focus);
+    if (group !== 'Другое') groups.add(group);
+  }
+  return [...groups];
+}
+
+async function showCorrectionDays(ctx: any, programId: number) {
+  const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
+  if (!rows[0]) return ctx.reply('Программа не найдена.');
+  const program = rows[0].program as Program;
+  const kb = new InlineKeyboard();
+  for (const day of program.days) kb.text(`🏋️ День ${day.day} — ${day.focus}`, `program:correct:day:${programId}:${day.day}`).row();
+  kb.text('⬅️ Назад к программе', `program:correct:back:${programId}`);
+  await ctx.reply('🔧 <b>Коррекция программы</b>\n\nВыбери день:', {parse_mode:'HTML',reply_markup:kb});
+}
+
+type PendingCorrection = {
+  programId: number;
+  day: number;
+  selections: Record<string, string>;
+};
+const pendingCorrections = new Map<number, PendingCorrection>();
+
+async function showCorrectionGroups(ctx: any, programId: number, dayNumber: number) {
+  const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
+  if (!rows[0]) return ctx.reply('Программа не найдена.');
+  const program = rows[0].program as Program;
+  const groups = correctionGroupsForDay(program, dayNumber);
+  const userId = ctx.from?.id ?? 0;
+  const pending = pendingCorrections.get(userId);
+  const selections = pending?.programId === programId && pending.day === dayNumber ? pending.selections : {};
+
+  const kb = new InlineKeyboard();
+  for (const group of groups) {
+    const mark = selections[group] ? '✅ ' : '';
+    kb.text(`${mark}💪 ${group}`, `program:correct:group:${programId}:${dayNumber}:${correctionGroupSlug(group)}`).row();
+  }
+  if (Object.keys(selections).length) {
+    kb.text('🔄 Обновить программу', `program:correct:apply:${programId}`).row();
+  }
+  kb.text('⬅️ Дни', `program:correct:days:${programId}`);
+
+  await ctx.reply(
+    `🏋️ <b>День ${dayNumber}</b>\n\nВыбери одну или несколько групп.\nПосле выбора упражнений нажми «🔄 Обновить программу» — до этого программа не изменится.`,
+    {parse_mode:'HTML',reply_markup:kb}
+  );
+}
+
+async function showCorrectionExercises(ctx: any, programId: number, dayNumber: number, group: string) {
+  const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
+  if (!rows[0]) return ctx.reply('Программа не найдена.');
+  const profileId = selectedClient.get(ctx.from?.id ?? 0) ?? ctx.from?.id;
+  const profile = profileId ? await getProfile(profileId) : null;
+  const library = await getLibraryExercises({
+    goal:String(profile?.goal ?? 'health'), experience:String(profile?.experience ?? 'beginner'),
+    location:String(profile?.location ?? 'gym'), workouts_per_week:Number(profile?.workouts_per_week ?? 4),
+    workout_duration:Number(profile?.workout_duration ?? 60), limitations:String(profile?.limitations ?? '')
+  }, Number(rows[0].program?.version ?? 1), true);
+
+  const categories = correctionCategorySet(group);
+  const candidates = library
+    .filter((row) =>
+      row.muscleGroupRu === group ||
+      (group === 'Плечи' && row.muscleGroupRu === 'Плечевой пояс') ||
+      (row.muscleGroupRu === '' && categories.has(row.category))
+    )
+    .filter((row) => isExerciseAllowed(row, String(profile?.limitations ?? '')));
+
+  const unique: LibraryExercise[] = [];
+  const seen = new Set<string>();
+  for (const row of candidates) {
+    const name = row.nameRu || ruExerciseName(row.name);
+    const key = normalizeText(name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(row);
+  }
+
+  const program = rows[0].program as Program;
+  const day = program.days.find((d) => d.day === dayNumber);
+  const targetExerciseIndex = day?.exercises.findIndex((exercise) =>
+    exercise.muscleGroup === group ||
+    exerciseMuscleGroup(exercise.name, day.focus) === group
+  ) ?? -1;
+  if (targetExerciseIndex < 0) return ctx.reply('В выбранном дне нет упражнения этой группы.');
+
+  const userId = ctx.from?.id ?? 0;
+  const existing = pendingCorrections.get(userId);
+  const pending: PendingCorrection = existing?.programId === programId && existing.day === dayNumber
+    ? existing
+    : {programId, day: dayNumber, selections: {}};
+  pendingCorrections.set(userId, pending);
+
+  const selectedId = pending.selections[group];
+  const kb = new InlineKeyboard();
+  unique.forEach((row, index) => {
+    const name = row.nameRu || ruExerciseName(row.name);
+    const mark = selectedId === row.id ? '✅ ' : '';
+    kb.text(`${mark}🏋️ ${name.slice(0, 30)}`, `program:correct:pick:${programId}:${dayNumber}:${index}`).row();
+  });
+  kb.text('⬅️ К группам', `program:correct:day:${programId}:${dayNumber}`);
+
+  correctionSessions.set(userId, {
+    programId,
+    day: dayNumber,
+    muscleGroup: group,
+    catalogChoices: unique.map((row) => row.id)
+  });
+
+  await ctx.reply(
+    `💪 <b>${escapeHtml(group)}</b>\n\nВыбери новое упражнение. Оно будет только отмечено.\nПрограмма изменится только после нажатия «🔄 Обновить программу».`,
+    {parse_mode:'HTML',reply_markup:kb}
+  );
+}
+
+const BASE_EXERCISE_PAGE_SIZE = 18;
+
+const EXERCISE_BASE_GROUPS = ['Грудь','Спина','Плечи','Плечевой пояс','Руки','Ноги','Голень','Кор'] as const;
+const EXERCISE_BASE_GROUP_SLUG: Record<string,string> = {
+  'Грудь':'ch','Спина':'back','Плечи':'sh','Плечевой пояс':'shoulder-girdle','Руки':'arms','Ноги':'legs','Голень':'calf','Кор':'core'
+};
+const EXERCISE_BASE_ENV_SLUG: Record<string,string> = { home:'home', gym:'gym', outdoor:'outdoor' };
+
+async function showExerciseBaseGroups(ctx: any) {
+  if (!(await isAdmin(ctx))) return ctx.reply('Доступ закрыт.');
+  const kb = new InlineKeyboard();
+  for (const group of EXERCISE_BASE_GROUPS) {
+    kb.text(`💪 ${group}`, `base:group:${EXERCISE_BASE_GROUP_SLUG[group]}`).row();
+  }
+  await ctx.reply(
+    '📚 <b>Полная база упражнений</b>\\n\\nПолный каталог упражнений. Подбор и фильтрация зависят от места тренировки и группы мышц. Выбери мышечную группу:',
+    {parse_mode:'HTML',reply_markup:kb}
+  );
+}
+
+function exerciseBaseGroupFromSlug(slug: string) {
+  return Object.entries(EXERCISE_BASE_GROUP_SLUG).find(([,value]) => value === slug)?.[0] ?? '';
+}
+
+function exerciseBaseEnvFromSlug(slug: string) {
+  return ({home:'home',gym:'gym',outdoor:'outdoor'} as Record<string,string>)[slug] ?? '';
+}
+
+async function showExerciseBaseEnvironments(ctx: any, group: string) {
+  const kb = new InlineKeyboard()
+    .text('🏠 Дом', `base:env:${EXERCISE_BASE_GROUP_SLUG[group]}:home`).row()
+    .text('🏋️ Зал', `base:env:${EXERCISE_BASE_GROUP_SLUG[group]}:gym`).row()
+    .text('🌳 Спортплощадка', `base:env:${EXERCISE_BASE_GROUP_SLUG[group]}:outdoor`).row()
+    .text('⬅️ Группы', 'base:groups');
+  await ctx.reply(`💪 <b>${escapeHtml(group)}</b>\\n\\nВыбери место тренировок:`, {parse_mode:'HTML',reply_markup:kb});
+}
+
+function exerciseBaseCategory(group: string) {
+  return ({
+    'Грудь':'chest',
+    'Спина':'back',
+    'Плечи':'shoulders',
+    'Плечевой пояс':'shoulders',
+    'Руки':'upper arms',
+    'Ноги':'upper legs',
+    'Голень':'lower legs',
+    'Кор':'waist'
+  } as Record<string,string>)[group] ?? '';
+}
+
+function exerciseBaseEquipmentFilter(environment: string) {
+  return environment === 'gym'
+    ? `equipment <> 'body weight'`
+    : `equipment = 'body weight'`;
+}
+
+function exerciseBaseDisplayName(row: { name_ru?: string; name?: string; equipment_ru?: string }) {
+  const base = String(row.name_ru || row.name || 'Упражнение').trim();
+  const source = normalizeText(String(row.name || ''));
+  const modifiers: string[] = [];
+
+  const add = (pattern: RegExp, label: string) => {
+    if (pattern.test(source) && !modifiers.includes(label)) modifiers.push(label);
+  };
+
+  add(/barbell/, 'со штангой');
+  add(/dumbbell/, 'с гантелями');
+  add(/cable|cross.?over/, 'на блоке');
+  add(/smith/, 'в машине Смита');
+  add(/lever|machine/, 'в тренажёре');
+  add(/kettlebell/, 'с гирей');
+  add(/band|resistance band/, 'с резинкой');
+  add(/medicine ball/, 'с медболом');
+  add(/incline/, 'под наклоном');
+  add(/decline/, 'с отрицательным наклоном');
+  add(/wide/, 'широким хватом');
+  add(/reverse grip|reverse.?grip/, 'обратным хватом');
+  add(/one arm|one-arm|single arm/, 'одной рукой');
+  add(/seated/, 'сидя');
+  add(/standing/, 'стоя');
+  add(/exercise ball|stability ball|fitball/, 'на фитболе');
+  add(/bosu/, 'на BOSU');
+
+  // If the Russian name is already specific, don't clutter it with redundant equipment.
+  const generic = /^(жим л[её]жа|отжимания|сведение рук для груди|сгибание рук на бицепс|разгибание рук на трицепс|упражнение для груди|функциональное упражнение)$/i.test(base);
+  if (generic && modifiers.length) return `${base} — ${modifiers.join(', ')}`;
+
+  return base;
+}
+
+async function getExerciseBaseRows(group: string, environment: string) {
+  const category = exerciseBaseCategory(group);
+  if (!category || !['home','gym','outdoor'].includes(environment)) return [];
+
+  const { rows } = await pool.query(
+    `SELECT id, name_ru, name, equipment_ru, level
+     FROM exercise_library
+     WHERE category = $1
+       AND id LIKE 'base-%'
+       AND catalog_version = $2
+       AND ${exerciseBaseEquipmentFilter(environment)}
+     ORDER BY id`,
+    [category, ANATOMY_CATALOG_VERSION]
+  );
+  return rows;
