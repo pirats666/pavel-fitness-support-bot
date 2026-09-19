@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { createServer } from 'node:http';
 import { Bot, InlineKeyboard } from 'grammy';
 import pg from 'pg';
-import { syncExerciseCatalog } from './exercise-catalog.js';
+import { syncExerciseCatalog, syncAnatomyExerciseCatalog } from './exercise-catalog.js';
 import { ANATOMY_CATALOG_VERSION } from './anatomy-exercise-catalog.js';
 import { createAIWorkoutPlan, aiEnabled, type AIPlannerProfile, type AIExerciseCandidate } from './ai-planner.js';
 
