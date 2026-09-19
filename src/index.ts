@@ -1394,7 +1394,7 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
   );
 }
 
-const baseBrowserSessions = new Map<number, string[]>();
+const BASE_EXERCISE_PAGE_SIZE = 18;
 
 const EXERCISE_BASE_GROUPS = ['Грудь','Спина','Плечи','Плечевой пояс','Руки','Ноги','Голень','Кор'] as const;
 const EXERCISE_BASE_GROUP_SLUG: Record<string,string> = {
@@ -1431,8 +1431,8 @@ async function showExerciseBaseEnvironments(ctx: any, group: string) {
   await ctx.reply(`💪 <b>${escapeHtml(group)}</b>\\n\\nВыбери место тренировок:`, {parse_mode:'HTML',reply_markup:kb});
 }
 
-async function showExerciseBaseList(ctx: any, group: string, environment: string) {
-  const category = ({
+function exerciseBaseCategory(group: string) {
+  return ({
     'Грудь':'chest',
     'Спина':'back',
     'Плечи':'shoulders',
@@ -1441,41 +1441,107 @@ async function showExerciseBaseList(ctx: any, group: string, environment: string
     'Ноги':'upper legs',
     'Голень':'lower legs',
     'Кор':'waist'
-  } as Record<string,string>)[group];
+  } as Record<string,string>)[group] ?? '';
+}
 
-  const equipmentFilter = environment === 'gym'
+function exerciseBaseEquipmentFilter(environment: string) {
+  return environment === 'gym'
     ? `equipment <> 'body weight'`
     : `equipment = 'body weight'`;
+}
+
+function exerciseBaseDisplayName(row: { name_ru?: string; name?: string; equipment_ru?: string }) {
+  const base = String(row.name_ru || row.name || 'Упражнение').trim();
+  const source = normalizeText(String(row.name || ''));
+  const modifiers: string[] = [];
+
+  const add = (pattern: RegExp, label: string) => {
+    if (pattern.test(source) && !modifiers.includes(label)) modifiers.push(label);
+  };
+
+  add(/barbell/, 'со штангой');
+  add(/dumbbell/, 'с гантелями');
+  add(/cable|cross.?over/, 'на блоке');
+  add(/smith/, 'в машине Смита');
+  add(/lever|machine/, 'в тренажёре');
+  add(/kettlebell/, 'с гирей');
+  add(/band|resistance band/, 'с резинкой');
+  add(/medicine ball/, 'с медболом');
+  add(/incline/, 'под наклоном');
+  add(/decline/, 'с отрицательным наклоном');
+  add(/wide/, 'широким хватом');
+  add(/reverse grip|reverse.?grip/, 'обратным хватом');
+  add(/one arm|one-arm|single arm/, 'одной рукой');
+  add(/seated/, 'сидя');
+  add(/standing/, 'стоя');
+  add(/exercise ball|stability ball|fitball/, 'на фитболе');
+  add(/bosu/, 'на BOSU');
+
+  // If the Russian name is already specific, don't clutter it with redundant equipment.
+  const generic = /^(жим л[её]жа|отжимания|сведение рук для груди|сгибание рук на бицепс|разгибание рук на трицепс|упражнение для груди|функциональное упражнение)$/i.test(base);
+  if (generic && modifiers.length) return `${base} — ${modifiers.join(', ')}`;
+
+  return base;
+}
+
+async function getExerciseBaseRows(group: string, environment: string) {
+  const category = exerciseBaseCategory(group);
+  if (!category || !['home','gym','outdoor'].includes(environment)) return [];
 
   const { rows } = await pool.query(
     `SELECT id, name_ru, name, equipment_ru, level
      FROM exercise_library
      WHERE category = $1
-       AND ${equipmentFilter}
-     ORDER BY name_ru NULLS LAST, name`,
+       AND ${exerciseBaseEquipmentFilter(environment)}
+     ORDER BY name_ru NULLS LAST, name, id`,
     [category]
   );
+  return rows;
+}
 
-  const userId = ctx.from?.id ?? 0;
-  baseBrowserSessions.set(userId, []);
+async function showExerciseBaseList(ctx: any, group: string, environment: string, page = 0) {
+  const rows = await getExerciseBaseRows(group, environment);
+  if (!rows.length) return ctx.reply('В этом разделе пока нет упражнений.');
+
+  const totalPages = Math.ceil(rows.length / BASE_EXERCISE_PAGE_SIZE);
+  const safePage = Math.max(0, Math.min(page, totalPages - 1));
+  const start = safePage * BASE_EXERCISE_PAGE_SIZE;
+  const pageRows = rows.slice(start, start + BASE_EXERCISE_PAGE_SIZE);
+
+  // Keep every database exercise, but make collapsed Russian aliases distinguishable.
+  // If two source records still resolve to the same visible name, add a stable variant suffix.
+  const seenNames = new Map<string, number>();
+  const labels = pageRows.map((row: any) => {
+    const raw = exerciseBaseDisplayName(row);
+    const key = normalizeText(raw);
+    const count = (seenNames.get(key) ?? 0) + 1;
+    seenNames.set(key, count);
+    return count === 1 ? raw : `${raw} — вариант ${count}`;
+  });
+
   const kb = new InlineKeyboard();
-  for (const row of rows) {
-    const name = String(row.name_ru || row.name || 'Упражнение');
-    kb.text(`🏋️ ${name.slice(0, 34)}`, `base:view:${baseBrowserSessions.get(ctx.from?.id ?? 0)?.length ?? 0}`).row();
-    const ids = baseBrowserSessions.get(ctx.from?.id ?? 0) ?? [];
-    ids.push(String(row.id));
-    baseBrowserSessions.set(ctx.from?.id ?? 0, ids);
+  pageRows.forEach((row: any, index: number) => {
+    kb.text(`🏋️ ${labels[index].slice(0, 48)}`, `base:view:${EXERCISE_BASE_GROUP_SLUG[group]}:${environment}:${safePage}:${index}`).row();
+  });
+
+  if (totalPages > 1) {
+    if (safePage > 0) kb.text('⬅️', `base:page:${EXERCISE_BASE_GROUP_SLUG[group]}:${environment}:${safePage - 1}`);
+    kb.text(`Стр. ${safePage + 1}/${totalPages}`, 'base:noop');
+    if (safePage < totalPages - 1) kb.text('➡️', `base:page:${EXERCISE_BASE_GROUP_SLUG[group]}:${environment}:${safePage + 1}`);
+    kb.row();
   }
+
   kb.text('⬅️ Место', `base:group:${EXERCISE_BASE_GROUP_SLUG[group]}`);
 
   const place = environment === 'home' ? 'Дом' : environment === 'gym' ? 'Зал' : 'Спортплощадка';
   await ctx.reply(
-    `📚 <b>${escapeHtml(group)}</b> — ${place}\n\nУпражнений в полном каталоге: <b>${rows.length}</b>\nВыбери упражнение:`,
+    `📚 <b>${escapeHtml(group)}</b> — ${place}\\n\\nУпражнений в полном каталоге: <b>${rows.length}</b>\\nСтраница <b>${safePage + 1}/${totalPages}</b>\\n\\nВыбери упражнение:`,
     {parse_mode:'HTML',reply_markup:kb}
   );
 }
 
 async function showExerciseBaseCard(ctx: any, exerciseId: string) {
+
   const { rows } = await pool.query(
     `SELECT name_ru, muscle_group_ru, equipment_ru, level, movement_pattern, target, secondary_muscles, instructions_ru, gif_url
      FROM exercise_library WHERE id=$1`,
@@ -2343,13 +2409,39 @@ bot.callbackQuery(/^base:env:([^:]+):(home|gym|outdoor)$/, async (ctx) => {
   await showExerciseBaseList(ctx, group, environment);
 });
 
-bot.callbackQuery(/^base:view:(\\d+)$/, async (ctx) => {
-  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
-  const index = Number(ctx.match[1]);
-  const exerciseId = baseBrowserSessions.get(ctx.from.id)?.[index];
-  if (!exerciseId) return ctx.answerCallbackQuery({ text: 'Упражнение не найдено. Открой группу заново.' });
+bot.callbackQuery('base:noop', async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
   await ctx.answerCallbackQuery();
-  await showExerciseBaseCard(ctx, exerciseId);
+});
+
+bot.callbackQuery(/^base:page:([^:]+):(home|gym|outdoor):(\\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const group = exerciseBaseGroupFromSlug(ctx.match[1]);
+  const environment = exerciseBaseEnvFromSlug(ctx.match[2]);
+  const page = Number(ctx.match[3]);
+  if (!group || !environment || !Number.isInteger(page) || page < 0) {
+    return ctx.answerCallbackQuery({ text: 'Раздел не найден.' });
+  }
+  await ctx.answerCallbackQuery();
+  await showExerciseBaseList(ctx, group, environment, page);
+});
+
+bot.callbackQuery(/^base:view:([^:]+):(home|gym|outdoor):(\\d+):(\\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const group = exerciseBaseGroupFromSlug(ctx.match[1]);
+  const environment = exerciseBaseEnvFromSlug(ctx.match[2]);
+  const page = Number(ctx.match[3]);
+  const index = Number(ctx.match[4]);
+  if (!group || !environment || !Number.isInteger(page) || !Number.isInteger(index) || page < 0 || index < 0) {
+    return ctx.answerCallbackQuery({ text: 'Раздел не найден.' });
+  }
+
+  const rows = await getExerciseBaseRows(group, environment);
+  const row = rows.slice(page * BASE_EXERCISE_PAGE_SIZE, (page + 1) * BASE_EXERCISE_PAGE_SIZE)[index];
+  if (!row) return ctx.answerCallbackQuery({ text: 'Упражнение не найдено. Открой страницу заново.' });
+
+  await ctx.answerCallbackQuery();
+  await showExerciseBaseCard(ctx, String(row.id));
 });
 
 bot.callbackQuery(/^program:correct:group:(\d+):(\d+):([^:]+)$/, async (ctx) => {
