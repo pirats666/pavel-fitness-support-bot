@@ -507,11 +507,10 @@ async function getLibraryExercises(profile: ProfileForProgram, version: number, 
      FROM exercise_library
      WHERE ${equipmentFilter}
        AND id LIKE 'base-%'
-       AND catalog_version = $1
        AND category IN ('upper legs','chest','back','shoulders','waist','lower legs','upper arms','lower arms')
      ORDER BY id
      LIMIT 200`,
-    [ANATOMY_CATALOG_VERSION]
+    []
   );
 
   const candidates: LibraryExercise[] = rows.map((row: any) => ({
