@@ -179,7 +179,7 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
   const mediaRows = await pool.query(
     `SELECT name, COALESCE(name_ru, '') AS name_ru, equipment, category, target, muscle_group, gif_url, image_url
      FROM exercise_library
-     WHERE id NOT LIKE 'anat-%' AND gif_url <> ''`
+     WHERE id NOT LIKE 'anat-%' AND id NOT LIKE 'base-%' AND gif_url <> ''`
   );
 
   const media = mediaRows.rows.map((row: any) => ({
@@ -188,99 +188,69 @@ export async function syncAnatomyExerciseCatalog(pool: Pool) {
     equipment: String(row.equipment ?? ''),
     category: String(row.category ?? ''),
     gifUrl: String(row.gif_url ?? ''),
-    target: String(row.target ?? ''),
-    muscleGroup: String(row.muscle_group ?? ''),
     imageUrl: String(row.image_url ?? '')
   }));
 
-  const normalizeWords = (value: string) => String(value ?? '')
-    .toLowerCase()
-    .replace(/ё/g, 'е')
-    .replace(/[^a-zа-я0-9]+/gi, ' ')
-    .split(/\s+/)
-    .filter((word) => word.length >= 3 && !['для','на','по','с','и','или','the','with','one'].includes(word));
+  const normalize = (value: string) => String(value ?? '')
+    .toLowerCase().replace(/ё/g,'е').replace(/[^a-zа-я0-9]+/gi,' ').trim();
 
-const mediaForExercise = (ex: typeof ANATOMY_EXERCISES[number]) => {
-    const explicit: Record<string, string> = {
-      'Жим штанги лёжа': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0025-EIeI8Vf.gif',
-      'Жим гантелей лёжа': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0289-vi8EhoE.gif',
-      'Жим штанги под наклоном 30–45°': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0047-Hj4FOCd.gif',
-      'Жим гантелей под наклоном 30–45°': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0314-ns0SIbU.gif',
-      'Тяга штанги': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0027-eZyBC3j.gif',
-      'Тяга верхнего блока одной рукой': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/3563-U5INZY6.gif',
-      'Тяга гантели': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0293-BJ0Hz5L.gif',
-      'Тяга гантелей': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0293-BJ0Hz5L.gif',
-      'Жим гантелей над головой': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0405-znQUdHY.gif',
-      'Жим гантелей/штанги': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0405-znQUdHY.gif',
-      'Жим в тренажёре': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0219-PzQanLE.gif',
-      'Отжимания': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/3327-gw9PqGk.gif',
-      'Разведения на заднюю дельту': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0669-xifhB5W.gif',
-      'Тяга верхнего блока': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/2330-LEprlgG.gif',
-      'Пуловер на блоке': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0238-x69MAlq.gif',
-      'Тяга к поясу': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0027-eZyBC3j.gif',
-      'Тяга гантелей к поясу': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/0293-BJ0Hz5L.gif',
-      'Приседание с гантелями + жим': 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/main/videos/3305-f7Y9eDZ.gif'
-    };
-    const direct = explicit[ex.name];
-    if (direct) return { gifUrl: direct, imageUrl: '' };
-
-    const normalize = (v: string) => String(v ?? '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/gi, ' ').trim();
+  const mediaForExercise = (ex: typeof ANATOMY_EXERCISES[number]) => {
     const wanted = normalize(ex.name);
-    const equipment = ex.environment === 'gym' ? 'gym' : 'body weight';
-
-    // Never use semantic/fuzzy matching for media. A plausible-looking GIF is worse than
-    // no GIF because it can silently demonstrate a different exercise.
     const exact = media.find((item) => {
       if (ex.environment === 'gym') {
         if (item.equipment === 'body weight') return false;
-      } else if (item.equipment !== 'body weight') return false;
-      if (item.category !== ex.category) return false;
+      } else if (item.equipment !== 'body weight') {
+        return false;
+      }
+      if (item.category && item.category !== ex.category) return false;
       return normalize(item.nameRu || item.name) === wanted || normalize(item.name) === wanted;
     });
-
     return exact ? { gifUrl: exact.gifUrl, imageUrl: exact.imageUrl } : { gifUrl: '', imageUrl: '' };
   };
 
+  // The workbook is the source of truth for the program generator.
+  // Remove the previous generated anatomy catalog so stale exercises cannot leak
+  // into new programs or correction choices.
+  await pool.query(`DELETE FROM exercise_library WHERE id LIKE 'anat-%' OR id LIKE 'base-%'`);
+
   for (const ex of ANATOMY_EXERCISES) {
-    const matchedMedia = mediaForExercise(ex);
+    const media = mediaForExercise(ex);
+    const trainingTypes = ex.typeRu.includes('Базовое')
+      ? ['maintenance','strength','hypertrophy']
+      : ['maintenance','hypertrophy'];
+    const level = ex.levelRu === 'Средний' ? 'intermediate' : 'beginner';
+    const contexts = [
+      ex.environment,
+      ...(ex.environment === 'outdoor' ? ['functional'] : []),
+      ...(/присед|выпад|тяга|жим|подтяг|отжим|шарнир|анти-|ротац|стабилиз|step-up/i.test(ex.primaryAction + ' ' + ex.name) ? ['functional'] : [])
+    ];
 
     await pool.query(
       `INSERT INTO exercise_library
         (id,name,category,equipment,target,muscle_group,secondary_muscles,instructions_ru,source_url,
          gif_url,image_url,name_ru,body_part_ru,equipment_ru,muscle_group_ru,training_types,movement_pattern,level,
          catalog_version,training_contexts,gif_verified)
-       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,$14,$15,$2,$9,$10,$11,'["maintenance","strength","hypertrophy"]'::jsonb,$12,'beginner',$13,$16::jsonb,$17)
-       ON CONFLICT (id) DO UPDATE SET
-         name=EXCLUDED.name,
-         category=EXCLUDED.category,
-         equipment=EXCLUDED.equipment,
-         target=EXCLUDED.target,
-         muscle_group=EXCLUDED.muscle_group,
-         instructions_ru=EXCLUDED.instructions_ru,
-         name_ru=EXCLUDED.name_ru,
-         body_part_ru=EXCLUDED.body_part_ru,
-         equipment_ru=EXCLUDED.equipment_ru,
-         muscle_group_ru=EXCLUDED.muscle_group_ru,
-         movement_pattern=EXCLUDED.movement_pattern,
-         catalog_version=EXCLUDED.catalog_version,
-         training_contexts=EXCLUDED.training_contexts,
-         gif_verified=EXCLUDED.gif_verified,
-         gif_url=EXCLUDED.gif_url,
-         image_url=EXCLUDED.image_url`,
+       VALUES ($1,$2,$3,$4,$5,$6,'[]'::jsonb,$7,$8,$9,$10,$2,$11,$12,$13,$14::jsonb,$15,$16,$17,$18::jsonb,$19)`,
       [
-        ex.id, ex.name, ex.category,
-        ex.environment === 'gym' ? (ex.equipmentRu === 'Блок' ? 'cable' : 'gym') : 'body weight',
-        ex.muscle, ex.muscle,
+        ex.id,
+        ex.name,
+        ex.category,
+        ex.environment === 'gym' ? 'gym' : 'body weight',
+        ex.muscle,
+        ex.muscleGroup,
         ex.notes,
-        'anatomo-training-database',
-        ex.muscleGroup, ex.equipmentRu, ex.muscle,
-        ex.primaryAction, ANATOMY_CATALOG_VERSION,
-        matchedMedia.gifUrl, matchedMedia.imageUrl,
-        JSON.stringify([
-          ex.environment === 'home' ? 'home' : ex.environment === 'outdoor' ? 'outdoor' : 'gym',
-          ...(ex.environment === 'outdoor' ? ['functional'] : [])
-        ]),
-        Boolean(matchedMedia.gifUrl)
+        'workbook-anatomo-trenirovochnaya-baza.xlsx',
+        media.gifUrl,
+        media.imageUrl,
+        ex.muscle,
+        ex.equipmentRu,
+        ex.muscleGroup,
+        JSON.stringify(trainingTypes),
+        ex.primaryAction,
+        level,
+        ANATOMY_CATALOG_VERSION,
+        JSON.stringify([...new Set(contexts)]),
+        Boolean(media.gifUrl)
       ]
     );
   }
@@ -290,8 +260,9 @@ const mediaForExercise = (ex: typeof ANATOMY_EXERCISES[number]) => {
      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
     [ANATOMY_CATALOG_VERSION]
   );
-  console.log('Anatomy exercise catalog synchronized:', ANATOMY_EXERCISES.length);
+  console.log('Training workbook catalog synchronized:', ANATOMY_EXERCISES.length);
 }
+
 export async function syncExerciseCatalog(pool: Pool) {
   const metaTable = 'exercise_catalog_meta';
   await pool.query('CREATE TABLE IF NOT EXISTS exercise_catalog_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
