@@ -52,3 +52,16 @@ export async function deleteClient(id: number): Promise<boolean> {
   return result.rowCount === 1;
 }
 export async function closeDb(): Promise<void> { await pool.end(); }
+
+export async function logDatabaseDiagnostics(): Promise<void> {
+  try {
+    const meta = await pool.query(`SELECT current_database() AS database, current_user AS user, current_schema() AS schema`);
+    const cols = await pool.query(`SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema='public' AND table_name='clients' ORDER BY ordinal_position`);
+    const constraints = await pool.query(`SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid='public.clients'::regclass`);
+    console.info('[DB DIAGNOSTIC] database=%s user=%s schema=%s', meta.rows[0]?.database, meta.rows[0]?.user, meta.rows[0]?.schema);
+    console.info('[DB DIAGNOSTIC] clients columns=%j', cols.rows);
+    console.info('[DB DIAGNOSTIC] clients constraints=%j', constraints.rows);
+  } catch (e) {
+    console.error('[DB DIAGNOSTIC] Failed:', e);
+  }
+}
