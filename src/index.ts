@@ -1279,6 +1279,10 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
     unique.push(row);
   }
 
+  const day = program.days.find((d) => d.day === dayNumber);
+  const targetExerciseIndex = day?.exercises.findIndex((exercise) => exerciseMuscleGroup(exercise.name, day.focus) === group) ?? -1;
+  if (targetExerciseIndex < 0) return ctx.reply('В выбранном дне нет упражнения этой группы.');
+
   correctionSessions.set(ctx.from?.id ?? 0, {
     programId,
     day: dayNumber,
@@ -1286,10 +1290,6 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
     exerciseIndex: targetExerciseIndex,
     catalogChoices: unique.map((row) => row.id)
   });
-
-  const day = program.days.find((d) => d.day === dayNumber);
-  const targetExerciseIndex = day?.exercises.findIndex((exercise) => exerciseMuscleGroup(exercise.name, day.focus) === group) ?? -1;
-  if (targetExerciseIndex < 0) return ctx.reply('В выбранном дне нет упражнения этой группы.');
 
   const kb = new InlineKeyboard();
   unique.slice(0, 50).forEach((row, index) => {
@@ -2106,6 +2106,16 @@ bot.callbackQuery(/^program:correct:day:(\d+):(\d+)$/, async (ctx) => {
   correctionSessions.set(ctx.from.id,{programId,day}); await ctx.answerCallbackQuery();
   await showCorrectionGroups(ctx,programId,day);
 });
+bot.callbackQuery(/^program:correct:back:(\d+)$/, async (ctx) => {
+  if (!(await isAdmin(ctx)) || !ctx.from) return ctx.answerCallbackQuery({ text: 'Доступ закрыт.' });
+  const programId = Number(ctx.match[1]);
+  const { rows } = await pool.query('SELECT program FROM training_programs WHERE id=$1', [programId]);
+  correctionSessions.delete(ctx.from.id);
+  if (!rows[0]) return ctx.answerCallbackQuery({ text: 'Программа не найдена.' });
+  await ctx.answerCallbackQuery();
+  return sendProgramMedia(ctx, rows[0].program as Program, programKeyboard(programId));
+});
+
 
 function correctionGroupSlug(group: string) {
   return ({'Грудь':'ch','Спина':'back','Плечи':'sh','Руки':'arms','Ноги':'legs','Кор':'core'} as Record<string,string>)[group] ?? 'other';
