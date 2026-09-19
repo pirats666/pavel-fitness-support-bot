@@ -43,7 +43,8 @@ async function render(ctx: Context, text: string, keyboard?: InlineKeyboard) {
 
 async function showMain(ctx: Context) { await render(ctx, mainText(), MAIN_MENU); }
 
-function clientDisplayName(c: Client) { return c.telegram_username ? '@' + c.telegram_username : [c.telegram_first_name, c.telegram_last_name].filter(Boolean).join(' '); }
+function clientDisplayName(c: Client) { return c.telegram_username ? '@' + c.telegram_username : 'Клиент'; }
+function telegramLabel(username: string | null) { return username ? `<a href="https://t.me/${esc(username)}">@${esc(username)}</a>` : 'Не указан'; }
 function clientsKeyboard(clients: Client[]) {
   const kb = new InlineKeyboard().text('➕ Добавить клиента','client:add').row();
   for (const c of clients) kb.text('👤 ' + clientDisplayName(c),'client:view:' + c.id).row();
@@ -61,10 +62,11 @@ function locLabel(key:string) { return Object.fromEntries(LOCATIONS.map(([l,k])=
 function clientCard(c:Client) {
   return [
     `👤 <b>${esc(clientDisplayName(c))}</b>`, '',
+    `📱 Telegram: ${telegramLabel(c.telegram_username)}`,
     `Возраст: ${c.age}`, `Рост: ${c.height_cm} см`, `Вес: ${c.weight_kg} кг`, '',
     `🎯 Цель: ${esc(c.goal)}`, `🏋️ Опыт: ${esc(c.experience)}`,
     `📅 Тренировок в неделю: ${c.workouts_per_week === 5 ? '5+' : c.workouts_per_week}`,
-    `📍 Место: ${esc(c.training_location)}`, '',
+    `📍 Место тренировок: ${esc(c.training_location)}`, '',
     `⚠️ Ограничения: ${esc(c.limitations) || 'Нет'}`,
     `📝 Заметка: ${esc(c.note) || 'Нет'}`, '',
     `Дата добавления: ${new Date(c.created_at).toLocaleString('ru-RU')}`
@@ -89,13 +91,14 @@ async function promptAdd(ctx:Context,s:AddSession) {
   const prompts:Record<AddSession['step'],string>={
     age:'Введите возраст клиента:', height:'Введите рост клиента в см:',
     weight:'Введите текущий вес клиента в кг:', goal:'Выберите основную цель клиента:',
-    custom_goal:'Напишите цель клиента вручную:', experience:'Выберите тренировочный опыт:',
+    telegram_username:'Введите Telegram username клиента:\n\nНапример:\n@username\n\nЕсли у клиента нет username — нажмите «Пропустить».', custom_goal:'Напишите цель клиента вручную:', experience:'Выберите тренировочный опыт:',
     frequency:'Сколько тренировок в неделю планируется?', location:'Где клиент будет тренироваться?',
     limitations_choice:'Есть ли ограничения, которые нужно учитывать при составлении программы?',
     limitations_text:'Напишите ограничения текстом:',
     note:'Добавьте дополнительную заметку о клиенте или нажмите «Пропустить».'
   };
   let kb:InlineKeyboard|undefined=cancelKb();
+  if(s.step==='telegram_username') kb=new InlineKeyboard().text('⏭ Пропустить','telegram:skip').row().text('❌ Отмена','client:add-cancel');
   if(s.step==='goal') kb=choices(GOALS);
   if(s.step==='experience') kb=choices(EXPERIENCES);
   if(s.step==='frequency') kb=choices(FREQUENCIES);
@@ -106,14 +109,14 @@ async function promptAdd(ctx:Context,s:AddSession) {
 }
 function positiveNumber(t:string) { const x=t.trim().replace(',','.'); if(!/^(?:\d+|\d+\.\d+)$/.test(x)) return null; const n=Number(x); return Number.isFinite(n)&&n>0?n:null; }
 function complete(d:Partial<ClientDraft>): d is ClientDraft {
-  return typeof d.telegram_user_id==='number' && typeof d.telegram_first_name==='string' && typeof d.age==='number' && d.age>=1 && d.age<=120
+  return typeof d.name==='string' && d.name.length>0 && typeof d.telegram_username !== 'undefined' && typeof d.age==='number' && d.age>=1 && d.age<=120
     && typeof d.height_cm==='number' && d.height_cm>0 && d.height_cm<=300
     && typeof d.weight_kg==='number' && d.weight_kg>0 && d.weight_kg<=500
     && typeof d.goal==='string' && typeof d.experience==='string' && typeof d.workouts_per_week==='number'
     && typeof d.training_location==='string' && typeof d.limitations==='string' && typeof d.note==='string';
 }
 function summary(d:ClientDraft) {
-  return ['👤 <b>Новый клиент</b>','',`Telegram: ${esc(d.telegram_username ? '@'+d.telegram_username : [d.telegram_first_name,d.telegram_last_name].filter(Boolean).join(' '))}`,`Возраст: ${d.age}`,`Рост: ${d.height_cm} см`,`Вес: ${d.weight_kg} кг`,'',
+  return ['👤 <b>Новый клиент</b>','',`📱 Telegram: ${telegramLabel(d.telegram_username ?? null)}`,`Возраст: ${d.age}`,`Рост: ${d.height_cm} см`,`Вес: ${d.weight_kg} кг`,'',
     `🎯 Цель: ${esc(d.goal)}`,`🏋️ Опыт: ${esc(d.experience)}`,`📅 Тренировок в неделю: ${d.workouts_per_week===5?'5+':d.workouts_per_week}`,
     `📍 Место: ${esc(d.training_location)}`,`⚠️ Ограничения: ${esc(d.limitations)||'Нет'}`,`📝 Заметка: ${esc(d.note)||'Нет'}`].join('\n');
 }
@@ -146,7 +149,8 @@ bot.command('start',async ctx=>{ addSessions.delete(ctx.from!.id); editSessions.
 bot.callbackQuery('main',async ctx=>{await ctx.answerCallbackQuery();addSessions.delete(ctx.from!.id);editSessions.delete(ctx.from!.id);await showMain(ctx);});
 bot.callbackQuery('notes',async ctx=>{await ctx.answerCallbackQuery();await render(ctx,'Этот раздел будет доступен на следующем этапе.',new InlineKeyboard().text('🏠 Главное меню','main'));});
 bot.callbackQuery('clients',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});
-bot.callbackQuery('client:add',async ctx=>{await ctx.answerCallbackQuery();addSessions.set(ctx.from.id,{step:'age',draft:{telegram_user_id:ctx.from.id, telegram_username:ctx.from.username ?? null, telegram_first_name:ctx.from.first_name, telegram_last_name:ctx.from.last_name ?? null}});await promptAdd(ctx,addSessions.get(ctx.from.id)!);});
+bot.callbackQuery('client:add',async ctx=>{await ctx.answerCallbackQuery();addSessions.set(ctx.from.id,{step:'telegram_username',draft:{telegram_user_id:null, telegram_username:null, telegram_first_name:null, telegram_last_name:null, name:'Клиент'}});await promptAdd(ctx,addSessions.get(ctx.from.id)!);});
+bot.callbackQuery('telegram:skip',async ctx=>{const s=addSessions.get(ctx.from.id);if(!s||s.step!=='telegram_username')return;await ctx.answerCallbackQuery();s.draft.telegram_username=null;s.step='age';await promptAdd(ctx,s);});
 bot.callbackQuery('client:add-cancel',async ctx=>{await ctx.answerCallbackQuery();addSessions.delete(ctx.from.id);await showClients(ctx);});
 
 for(const [label,data] of GOALS) bot.callbackQuery(data,async ctx=>{
@@ -189,6 +193,13 @@ bot.on('message:text',async ctx=>{
   const add=addSessions.get(uid);
   if(add) console.info('[FSM] incoming state=%s input=%j',add.step,t);
   if(add){
+    if(add.step==='telegram_username'){
+      if(!t)return ctx.reply('Введите username или нажмите «Пропустить».');
+      const username=t.replace(/^@/,'').trim();
+      if(!/^[A-Za-z0-9_]{5,32}$/.test(username)) return ctx.reply('Введите корректный Telegram username или нажмите «Пропустить».');
+      add.draft.telegram_username=username; add.draft.telegram_user_id=null; add.draft.telegram_first_name=null; add.draft.telegram_last_name=null; add.draft.name='@'+username; add.step='age';
+      return promptAdd(ctx,add);
+    }
     if(add.step==='age'){
       console.info('[FSM] state=AGE input=%j handler=AGE',t);
       const n=Number(t);
