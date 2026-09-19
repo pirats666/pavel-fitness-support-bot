@@ -223,7 +223,7 @@ function buildInstructions(profile: AIPlannerProfile, exercises: AIExerciseCandi
           'Для спортивной площадки используй ТОЛЬКО упражнения с оборудованием «Собственный вес».',
           'Для спортивной площадки запрещены любые тренажёры, блоки, гантели, штанги, гири, резинки, фитболы, дополнительный вес и ассистирующие тренажёры.',
           'Турники и брусья допустимы только как элемент самой спортивной площадки; нагрузка при этом должна оставаться только собственным весом.',
-          'Каждый выбранный outdoor-вариант должен иметь equipmentRu ровно «Собственный вес».'
+          'Каждый выбранный outdoor-вариант должен иметь equipmentRu, начинающийся с «Собственный вес».'
         ]
       : [];
 
@@ -306,7 +306,7 @@ function buildInstructions(profile: AIPlannerProfile, exercises: AIExerciseCandi
     }),
     '',
     'ПОЛНЫЙ СПИСОК НАЗВАНИЙ УПРАЖНЕНИЙ ИЗ БАЗЫ (используй его для выбора терминологии; в план можно ставить только ID из доступного каталога):',
-    allExerciseNames.length ? allExerciseNames.map((name, i) => `${i + 1}. ${name}`).join('\\n') : 'список не передан',
+    allExerciseNames.length ? allExerciseNames.map((name, i) => `${i + 1}. ${name}`).join('\n') : 'список не передан',
     '',
     'ДОСТУПНЫЕ УПРАЖНЕНИЯ С ID:',
     catalogText(planningExercises),
