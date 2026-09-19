@@ -121,7 +121,7 @@ function catalogText(exercises: AIExerciseCandidate[]) {
   ].join(' | ')).join('\n');
 }
 
-function buildInstructions(profile: AIPlannerProfile, exercises: AIExerciseCandidate[], correction: string) {
+function buildInstructions(profile: AIPlannerProfile, exercises: AIExerciseCandidate[], correction: string, allExerciseNames: string[]) {
   const methods = [
     'full body',
     'upper/lower',
@@ -185,7 +185,10 @@ function buildInstructions(profile: AIPlannerProfile, exercises: AIExerciseCandi
       trainingFocus: profile.trainingFocus || 'автоматический выбор'
     }),
     '',
-    'ДОСТУПНЫЕ УПРАЖНЕНИЯ:',
+    'ПОЛНЫЙ СПИСОК НАЗВАНИЙ УПРАЖНЕНИЙ ИЗ БАЗЫ (используй его для выбора терминологии; в план можно ставить только ID из доступного каталога):',
+    allExerciseNames.length ? allExerciseNames.map((name, i) => `${i + 1}. ${name}`).join('\\n') : 'список не передан',
+    '',
+    'ДОСТУПНЫЕ УПРАЖНЕНИЯ С ID:',
     catalogText(exercises),
     '',
     correction ? 'КОРРЕКЦИЯ ПРЕДЫДУЩЕЙ ВЕРСИИ: ' + correction : 'Это первая версия программы.',
@@ -229,7 +232,8 @@ function validatePlan(plan: AIWorkoutPlan, profile: AIPlannerProfile, catalog: A
 export async function createAIWorkoutPlan(
   profile: AIPlannerProfile,
   exercises: AIExerciseCandidate[],
-  correction = ''
+  correction = '',
+  allExerciseNames: string[] = []
 ): Promise<AIWorkoutPlan | null> {
   if (!apiKey) {
     console.warn('OPENAI_API_KEY is not configured; using deterministic planner.');
@@ -251,7 +255,7 @@ export async function createAIWorkoutPlan(
           content: [
             {
               type: 'input_text',
-              text: buildInstructions(profile, exercises, correction)
+              text: buildInstructions(profile, exercises, correction, allExerciseNames)
             }
           ]
         }
