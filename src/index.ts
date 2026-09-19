@@ -141,8 +141,8 @@ bot.use(async(ctx,next)=>{
   await next();
 });
 
-bot.command('start',async ctx=>{ addSessions.delete(ctx.from.id); editSessions.delete(ctx.from.id); await showMain(ctx); });
-bot.callbackQuery('main',async ctx=>{await ctx.answerCallbackQuery();addSessions.delete(ctx.from.id);editSessions.delete(ctx.from.id);await showMain(ctx);});
+bot.command('start',async ctx=>{ addSessions.delete(ctx.from!.id); editSessions.delete(ctx.from!.id); await showMain(ctx); });
+bot.callbackQuery('main',async ctx=>{await ctx.answerCallbackQuery();addSessions.delete(ctx.from!.id);editSessions.delete(ctx.from!.id);await showMain(ctx);});
 bot.callbackQuery('notes',async ctx=>{await ctx.answerCallbackQuery();await render(ctx,'Этот раздел будет доступен на следующем этапе.',new InlineKeyboard().text('🏠 Главное меню','main'));});
 bot.callbackQuery('clients',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});
 bot.callbackQuery('client:add',async ctx=>{await ctx.answerCallbackQuery();addSessions.set(ctx.from.id,{step:'name',draft:{}});await promptAdd(ctx,addSessions.get(ctx.from.id)!);});
@@ -177,7 +177,6 @@ const editPrompts:Record<keyof ClientDraft,string>={
 };
 bot.callbackQuery(/editfield:(\\d+):(.+)/,async ctx=>{const id=Number(ctx.match[1]);const field=ctx.match[2] as keyof ClientDraft;const allowed=Object.keys(editPrompts);if(!allowed.includes(field))return;await ctx.answerCallbackQuery();editSessions.set(ctx.from.id,{clientId:id,field});await render(ctx,editPrompts[field],editChoices(field));});
 bot.callbackQuery('editcancel',async ctx=>{await ctx.answerCallbackQuery();const s=editSessions.get(ctx.from.id);editSessions.delete(ctx.from.id);if(s)await showClient(ctx,s.clientId);});
-for(const [label,data] of GOALS) bot.callbackQuery('editgoal:'+data,async ctx=>{});
 for(const [label,data] of GOALS) bot.callbackQuery('edit:'+data,async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='goal')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'goal',label);editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
 for(const [label,data] of EXPERIENCES) bot.callbackQuery('edit:'+data,async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='experience')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'experience',label);editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
 for(const [label,data] of FREQUENCIES) bot.callbackQuery('edit:'+data,async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='workouts_per_week')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'workouts_per_week',Number(data.slice(5)));editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
