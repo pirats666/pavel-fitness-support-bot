@@ -32,6 +32,7 @@ type QuizState = {
   workoutsPerWeek?: number;
   workoutDuration?: number;
   limitations?: string;
+  training_focus?: string;
 };
 
 type Exercise = {
@@ -46,15 +47,22 @@ type Exercise = {
 type LibraryExercise = {
   id: string;
   name: string;
+  nameRu: string;
   category: string;
+  bodyPartRu: string;
   equipment: string;
+  equipmentRu: string;
   target: string;
   muscleGroup: string;
+  muscleGroupRu: string;
   secondaryMuscles: string[];
   instructionsRu: string;
   sourceUrl: string;
   gifUrl?: string;
   imageUrl?: string;
+  trainingTypes: string[];
+  movementPattern: string;
+  level: string;
 };
 
 type WorkoutDay = {
@@ -197,8 +205,19 @@ async function ensureDatabase() {
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_total INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_sessions_remaining INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE trainer_profiles ADD COLUMN IF NOT EXISTS training_focus TEXT NOT NULL DEFAULT 'auto';
     ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS gif_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS name_ru TEXT NOT NULL DEFAULT '';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS body_part_ru TEXT NOT NULL DEFAULT '';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS equipment_ru TEXT NOT NULL DEFAULT '';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS muscle_group_ru TEXT NOT NULL DEFAULT '';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS training_types JSONB NOT NULL DEFAULT '["maintenance"]'::jsonb;
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS movement_pattern TEXT NOT NULL DEFAULT '';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS level TEXT NOT NULL DEFAULT 'beginner';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS media_id TEXT NOT NULL DEFAULT '';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS attribution TEXT NOT NULL DEFAULT '';
+    ALTER TABLE exercise_library ADD COLUMN IF NOT EXISTS catalog_version TEXT NOT NULL DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS bot_settings (
       key TEXT PRIMARY KEY,
@@ -626,7 +645,9 @@ async function saveProfile(user: { id: number; username?: string; firstName: str
        telegram_username=EXCLUDED.telegram_username, first_name=EXCLUDED.first_name,
        goal=EXCLUDED.goal, experience=EXCLUDED.experience, location=EXCLUDED.location,
        workouts_per_week=EXCLUDED.workouts_per_week, workout_duration=EXCLUDED.workout_duration,
-       limitations=EXCLUDED.limitations, updated_at=NOW()`,
+       limitations=EXCLUDED.limitations,
+       training_focus=CASE WHEN EXCLUDED.goal='mass' THEN 'hypertrophy' WHEN EXCLUDED.goal='loss' THEN 'endurance' ELSE 'maintenance' END,
+       updated_at=NOW()`,
     [user.id, user.username ?? null, user.firstName, state.goal, state.experience, state.location,
       state.workoutsPerWeek, state.workoutDuration, state.limitations ?? '']
   );
@@ -1652,6 +1673,7 @@ async function main() {
   await pool.query('SELECT 1');
   await ensureDatabase();
   await seedExerciseLibrary();
+  await syncExerciseCatalog();
   const integrity = await pool.query(`SELECT
     (SELECT COUNT(*) FROM trainer_profiles) AS profiles,
     (SELECT COUNT(*) FROM training_programs) AS programs,
