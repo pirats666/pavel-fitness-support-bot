@@ -699,6 +699,39 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     return result;
   };
 
+  const exerciseFamily = (row: LibraryExercise) => normalize(
+    (row.nameRu || row.name)
+      .replace(/гантел[ьи]|штанг[аи]|тренажер|тренажёре|смита|нижний блок|средний блок|верхний блок|блок|канат|скамья|машина/gi, '')
+      .replace(/\s+/g, ' ')
+  );
+  const takeDiverse = (count: number, filter: (row: LibraryExercise) => boolean) => {
+    const pool = candidates
+      .filter((row) => !used.has(row.id) && !usedNames.has(normalize(row.nameRu || row.name)))
+      .filter(filter)
+      .sort((a,b) => priority(b)-priority(a));
+    const result: LibraryExercise[] = [];
+    const families = new Set<string>();
+    for (const row of pool) {
+      const family = exerciseFamily(row);
+      if (families.has(family)) continue;
+      families.add(family);
+      result.push(row);
+      used.add(row.id);
+      usedNames.add(normalize(row.nameRu || row.name));
+      if (result.length >= count) break;
+    }
+    if (result.length < count) {
+      for (const row of pool) {
+        if (result.some((x) => x.id === row.id)) continue;
+        result.push(row);
+        used.add(row.id);
+        usedNames.add(normalize(row.nameRu || row.name));
+        if (result.length >= count) break;
+      }
+    }
+    return result;
+  };
+
   const priority = (row: LibraryExercise) => {
     let score = 0;
     const text = normalize(row.nameRu || row.name);
@@ -775,31 +808,31 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
 
     resetDaySelection();
     days.push(makeDay(1, 'День 1 — Грудь + руки', 'Грудь + руки', [
-      ...takeDistinct(3, byGroup('Грудь')),
-      ...takeDistinct(2, byTarget('Руки', /бицепс|biceps/)),
-      ...takeDistinct(1, byTarget('Руки', /трицепс|triceps/))
+      ...takeDiverse(3, byGroup('Грудь')),
+      ...takeDiverse(2, byTarget('Руки', /бицепс|biceps/)),
+      ...takeDiverse(1, byTarget('Руки', /трицепс|triceps/))
     ].slice(0, 6)));
 
     resetDaySelection();
     days.push(makeDay(2, 'День 2 — Спина + плечи', 'Спина + плечи', [
-      ...takeDistinct(3, byGroup('Спина'), [/разгибател/]),
-      ...takeDistinct(3, byGroup('Плечи'))
+      ...takeDiverse(3, byGroup('Спина')),
+      ...takeDiverse(3, byGroup('Плечи'))
     ].slice(0, 6)));
 
     resetDaySelection();
     days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', [
-      ...takeDistinct(1, byTarget('Ноги', /квадрицепс|quadriceps|quad/)),
-      ...takeDistinct(1, byTarget('Ноги', /ягодич|glute/)),
-      ...takeDistinct(1, byTarget('Ноги', /задняя поверхность бедра|hamstring/), [/станов|deadlift|румын/]),
-      ...takeDistinct(1, byTarget('Ноги', /квадрицепс|quadriceps|quad/), [/присед/]),
-      ...takeDistinct(1, byGroup('Голень')),
-      ...takeDistinct(1, byGroup('Кор'))
+      ...takeDiverse(1, byTarget('Ноги', /квадрицепс|quadriceps|quad/)),
+      ...takeDiverse(1, byTarget('Ноги', /ягодич|glute/)),
+      ...takeDiverse(1, byTarget('Ноги', /задняя поверхность бедра|hamstring/)),
+      ...takeDiverse(1, byTarget('Ноги', /квадрицепс|quadriceps|quad/)),
+      ...takeDiverse(1, byGroup('Голень')),
+      ...takeDiverse(1, byGroup('Кор'))
     ].slice(0, 6)));
   } else if (frequency === 4) {
     resetDaySelection();
-    days.push(makeDay(1, 'День 1 — Грудь', 'Грудь', take(6, byGroup('Грудь'), priority).slice(0, 6)));
+    days.push(makeDay(1, 'День 1 — Грудь', 'Грудь', takeDiverse(6, byGroup('Грудь')).slice(0, 6)));
     resetDaySelection();
-    days.push(makeDay(2, 'День 2 — Спина', 'Спина', take(6, byGroup('Спина'), priority).slice(0, 6)));
+    days.push(makeDay(2, 'День 2 — Спина', 'Спина', takeDiverse(6, byGroup('Спина')).slice(0, 6)));
     resetDaySelection();
     days.push(makeDay(3, 'День 3 — Ноги', 'Ноги', [
       ...take(2, byTarget('Ноги', /квадрицепс|quadriceps|quad/), priority),
@@ -829,11 +862,11 @@ async function buildProgram(profile: any, version: number, correction = ''): Pro
     ].slice(0, 6)));
     resetDaySelection();
     days.push(makeDay(4, 'День 4 — Руки', 'Руки', [
-      ...take(3, byTarget('Руки', /бицепс|biceps/), priority),
-      ...take(3, byTarget('Руки', /трицепс|triceps/), priority)
+      ...takeDiverse(3, byTarget('Руки', /бицепс|biceps/)),
+      ...takeDiverse(3, byTarget('Руки', /трицепс|triceps/))
     ].slice(0, 6)));
     resetDaySelection();
-    days.push(makeDay(5, 'День 5 — Плечи', 'Плечи', take(6, byGroup('Плечи'), priority).slice(0, 6)));
+    days.push(makeDay(5, 'День 5 — Плечи', 'Плечи', takeDiverse(6, byGroup('Плечи')).slice(0, 6)));
   }
 
   const format = frequency <= 2 ? 'Full Body' : `Сплит ${frequency} дней`;
