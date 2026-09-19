@@ -1279,6 +1279,7 @@ async function showCorrectionExercises(ctx: any, programId: number, dayNumber: n
     unique.push(row);
   }
 
+  const program = rows[0].program as Program;
   const day = program.days.find((d) => d.day === dayNumber);
   const targetExerciseIndex = day?.exercises.findIndex((exercise) => exerciseMuscleGroup(exercise.name, day.focus) === group) ?? -1;
   if (targetExerciseIndex < 0) return ctx.reply('В выбранном дне нет упражнения этой группы.');
@@ -2201,7 +2202,7 @@ bot.callbackQuery(/^program:correct:pick:(\d+):(\d+):(\d+)$/, async (ctx) => {
 
   correctionSessions.delete(ctx.from.id);
   await ctx.answerCallbackQuery({ text: 'Упражнение заменено.' });
-  await ctx.reply(`✅ День ${dayNumber}: «${escapeHtml(replacement.name)}» установлено вместо первого упражнения группы «${escapeHtml(group)}».`, {parse_mode:'HTML'});
+  await ctx.reply(`✅ День ${dayNumber}: «${escapeHtml(replacement.name)}» установлено вместо выбранного упражнения группы «${escapeHtml(group)}».`, {parse_mode:'HTML'});
   return sendProgramMedia(ctx, nextProgram, programKeyboard(Number(saved.rows[0].id)));
 });
 
