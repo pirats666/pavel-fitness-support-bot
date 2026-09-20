@@ -132,10 +132,10 @@ export async function migrateFollowingBaseTemplateSchema(): Promise<void> {
 техники и заданного RIR.`;
 
   const { rows } = await pool.query(
-    \`INSERT INTO public.coach_training_program_templates(name,goal,duration_weeks,comment)
+    `INSERT INTO public.coach_training_program_templates(name,goal,duration_weeks,comment)
      VALUES($1,$2,NULL,$3)
      ON CONFLICT(name) DO UPDATE SET goal=EXCLUDED.goal,comment=EXCLUDED.comment,updated_at=NOW()
-     RETURNING id\`,
+     RETURNING id`,
     [
       'Базовая программа Full Body + специализация — 3 дня',
       'Развитие силы и мышечной массы с акцентом на отдельные мышечные группы',
