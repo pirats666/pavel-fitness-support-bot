@@ -246,7 +246,7 @@ async function showStrategy(ctx:Context,id:number){
 }
 
 function normalizeProgramText(value:string){
-  return value.split('\\\\n').join('\n').split('/n').join('\n').trim();
+  return value.split('\\n').join('\n').split('/n').join('\n').trim();
 }
 function formatProgramComment(comment:string){
   const normalized=normalizeProgramText(comment);
