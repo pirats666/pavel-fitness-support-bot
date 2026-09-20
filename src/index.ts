@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
 import { Bot, InlineKeyboard, type Context } from 'grammy';
-import { closeDb, createClient, deleteClient, getClient, listClients, updateClientField, logDatabaseDiagnostics, migrateStage1Schema, migrateStage2AssessmentSchema, getPrimaryAssessment, upsertPrimaryAssessment } from './db.js';
-import type { Client, ClientDraft, AddSession, PrimaryAssessment } from './types.js';
+import { closeDb, createClient, deleteClient, getClient, listClients, updateClientField, logDatabaseDiagnostics, migrateStage1Schema, migrateStage2AssessmentSchema, migrateStage3StrategySchema, getPrimaryAssessment, upsertPrimaryAssessment, getTrainingStrategy, upsertTrainingStrategy } from './db.js';
+import type { Client, ClientDraft, AddSession, PrimaryAssessment, TrainingStrategy } from './types.js';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID;
@@ -19,6 +19,8 @@ const addSessions = new Map<number, AddSession>();
 const editSessions = new Map<number, { clientId: number; field: keyof ClientDraft }>();
 type AssessmentDraft = Omit<PrimaryAssessment,'created_at'|'updated_at'>;
 const assessmentSessions = new Map<number,{clientId:number;draft:AssessmentDraft;awaitingText?:keyof AssessmentDraft}>();
+type StrategyDraft = Omit<TrainingStrategy,'created_at'|'updated_at'>;
+const strategySessions = new Map<number,{clientId:number;draft:StrategyDraft;awaitingText?:keyof StrategyDraft}>();
 
 const GOALS = [
   ['🎯 Набор мышечной массы','goal:muscle'], ['🔥 Снижение веса','goal:weight'],
@@ -75,7 +77,7 @@ function clientCard(c:Client) {
   ].join('\n');
 }
 function clientActions(id:number) {
-  return new InlineKeyboard().text('🧩 Первичная оценка','assessment:'+id).row().text('✏️ Редактировать','client:edit:'+id).row()
+  return new InlineKeyboard().text('🧩 Первичная оценка','assessment:'+id).row().text('🎯 Стратегия тренировок','strategy:'+id).row().text('✏️ Редактировать','client:edit:'+id).row()
     .text('🗑 Удалить клиента','client:delete:'+id).row()
     .text('⬅️ К клиентам','clients').row().text('🏠 Главное меню','main');
 }
@@ -255,6 +257,13 @@ bot.on('message:text',async ctx=>{
     assessment.awaitingText=undefined;
     return render(ctx,assessmentText(assessment.draft),assessmentMenu(assessment.clientId));
   }
+  const strategy=strategySessions.get(uid);
+  if(strategy?.awaitingText){
+    if(!t)return ctx.reply('Введите текст или нажмите «Пропустить».');
+    (strategy.draft as any)[strategy.awaitingText]=t;
+    strategy.awaitingText=undefined;
+    return render(ctx,strategyText(strategy.draft),strategyMenu(strategy.clientId));
+  }
   const edit=editSessions.get(uid);
   if(edit){
     try{
@@ -269,7 +278,7 @@ bot.on('message:text',async ctx=>{
 });
 
 bot.catch(e=>console.error('Telegram bot error',e));
-void migrateStage1Schema().then(()=>migrateStage2AssessmentSchema()).then(()=>logDatabaseDiagnostics()).catch(e=>{console.error('[DB MIGRATION] Failed:',e);process.exit(1);});
+void migrateStage1Schema().then(()=>migrateStage2AssessmentSchema()).then(()=>migrateStage3StrategySchema()).then(()=>logDatabaseDiagnostics()).catch(e=>{console.error('[DB MIGRATION] Failed:',e);process.exit(1);});
 const server=createServer((req,res)=>{if(req.url==='/health'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));return;}res.writeHead(404);res.end();});
 server.listen(PORT,()=>console.log('HTTP health server listening on '+PORT));
 async function shutdown(signal:string){console.log('Received '+signal+', shutting down');await bot.stop();await closeDb();server.close();process.exit(0);}
