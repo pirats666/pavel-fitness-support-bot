@@ -338,6 +338,41 @@ bot.callbackQuery(/^program:edit-save:(\d+)$/,async ctx=>{
 });
 bot.callbackQuery(/^program:cancel:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();programSessions.delete(ctx.from!.id);await showProgram(ctx,id);});
 bot.callbackQuery(/^program:skipgoal:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);const s=programSessions.get(ctx.from!.id);if(!s||s.kind!=='program'||!s.program)return;await ctx.answerCallbackQuery();s.program.goal=null;s.step='duration';await render(ctx,'Введите срок программы в неделях:',new InlineKeyboard().text('⏭ Пропустить','program:skipduration:'+s.clientId).row().text('❌ Отмена','program:cancel:'+s.clientId));});
+bot.callbackQuery(/^program:days:(\\d+)$/,async ctx=>{
+  const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();
+  const days=await listTrainingProgramDays(id);
+  const kb=new InlineKeyboard();
+  for(const d of days)kb.text('🏋️ День '+d.day_number+' — '+d.name.replace(/^День\\s*\\d+\\s*[—-]?\\s*/i,''),'program:day:'+d.id).row();
+  kb.text('⬅️ К программе','program:'+id);
+  await render(ctx,days.length?'📋 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>\\n\\nВыберите день:':'📋 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>\\n\\nДни пока не созданы.',kb);
+});
+bot.callbackQuery(/^program:day:(\\d+)$/,async ctx=>{
+  const dayId=Number(ctx.match[1]);await ctx.answerCallbackQuery();
+  const d=await getTrainingProgramDay(dayId);if(!d)return;
+  const ex=await listTrainingProgramExercises(dayId);
+  const lines=[dayTitle(d),''];
+  ex.forEach((e,i)=>lines.push((i+1)+'. <b>'+esc(e.name)+'</b>'+(e.muscle_group?' — '+esc(e.muscle_group):'')+'\\n   '+e.sets+' × '+esc(e.reps)+(e.rest_seconds!==null?' · отдых '+e.rest_seconds+' сек.':'')+(e.rir!==null?' · RIR '+e.rir:'')+(e.comment&&!/^Отдых:/i.test(e.comment)?'\\n   📝 '+esc(e.comment):'')));
+  const kb=new InlineKeyboard().text('✏️ Скорректировать день','program:edit-day:'+dayId).row();
+  for(const e of ex)kb.text('🏋️ '+e.name,'program:edit-ex:'+e.id).row();
+  kb.text('⬅️ К тренировочным дням','program:days:'+d.client_id).row().text('⬅️ К программе','program:'+d.client_id);
+  await render(ctx,lines.join('\\n'),kb);
+});
+bot.callbackQuery(/^program:edit-day:(\\d+)$/,async ctx=>{
+  const dayId=Number(ctx.match[1]);await ctx.answerCallbackQuery();
+  const d=await getTrainingProgramDay(dayId);if(!d)return;
+  const ex=await listTrainingProgramExercises(dayId);
+  const kb=new InlineKeyboard();
+  for(const e of ex)kb.text('🏋️ '+e.name,'program:edit-ex:'+e.id).row();
+  kb.text('➕ Добавить упражнение','program:exercise:new:'+dayId).row();
+  kb.text('⬅️ К дню','program:day:'+dayId).row().text('⬅️ К программе','program:'+d.client_id);
+  await render(ctx,dayTitle(d)+'\\n\\n✏️ <b>Корректировка дня</b>\\n\\nВыберите упражнение:',kb);
+});
+bot.callbackQuery(/^program:exercise:new:(\\d+)$/,async ctx=>{
+  const dayId=Number(ctx.match[1]);await ctx.answerCallbackQuery();
+  const d=await getTrainingProgramDay(dayId);if(!d)return;
+  programSessions.set(ctx.from!.id,{clientId:d.client_id,kind:'exercise',step:'name',dayId,exercise:{day_id:dayId}});
+  await render(ctx,'➕ <b>Упражнение</b>\\n\\nВведите название упражнения:',new InlineKeyboard().text('❌ Отмена','program:day:'+dayId));
+});
 bot.callbackQuery(/^strategy:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();await showStrategy(ctx,id);});
 bot.callbackQuery(/^strategy:(?:new|edit):(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();try{await loadStrategySession(ctx,id);await render(ctx,'🎯 <b>Стратегия тренировок</b>\\n\\nВыберите раздел для заполнения или изменения.',strategyMenu(id));}catch(e){console.error('[STRATEGY OPEN FAILED]',e);await render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));}});
 bot.callbackQuery(/^strategy:field:(\d+):(main_task|priorities|what_to_account_for|main_focus|trainer_decision)$/,async ctx=>{const id=Number(ctx.match[1]);const field=ctx.match[2] as StrategyField;await ctx.answerCallbackQuery();const s=await loadStrategySession(ctx,id);s.awaitingText=field;const labels:Record<StrategyField,string>={main_task:'🎯 Основная задача',priorities:'⭐ Приоритеты',what_to_account_for:'⚠️ Что учитывать',main_focus:'🔎 Основной фокус',trainer_decision:'📝 Решение / комментарий тренера'};await render(ctx,labels[field]+'\\n\\nВведите текст или нажмите «Пропустить».',new InlineKeyboard().text('⏭ Пропустить','strategy:skip:'+id+':'+field).row().text('⬅️ Назад к стратегии','strategy:menu:'+id));});
