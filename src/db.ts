@@ -1,5 +1,5 @@
 import pg from 'pg';
-import type { Client, ClientDraft, PrimaryAssessment, TrainingStrategy, TrainingProgram, TrainingProgramDay, TrainingProgramExercise } from './types.js';
+import type { Client, ClientDraft, PrimaryAssessment, TrainingStrategy, TrainingProgram, TrainingProgramDay, TrainingProgramExercise, TrainingProgramTemplate, TrainingProgramTemplateDay, TrainingProgramTemplateExercise } from './types.js';
 
 const { Pool } = pg;
 const DATABASE_URL = process.env.DATABASE_URL;
