@@ -246,36 +246,52 @@ async function showStrategy(ctx:Context,id:number){
 }
 
 function normalizeProgramText(value:string){
-  return value.split('\\n').join('\n').split('/n').join('\n').trim();
+  return value.split('\\\\n').join('\\n').split('/n').join('\\n').trim();
 }
 function formatProgramComment(comment:string){
   const normalized=normalizeProgramText(comment);
-  return normalized.split('\n').map(line=>{
+  return normalized.split('\\n').map(line=>{
     const t=line.trim();
     if(!t)return '';
     if(/^График:$/i.test(t))return '📅 <b>ГРАФИК</b>';
     if(/^Интенсивность:$/i.test(t))return '🔥 <b>ИНТЕНСИВНОСТЬ</b>';
+    if(/^Отдых между подходами:$/i.test(t))return '⏱ <b>ОТДЫХ МЕЖДУ ПОДХОДАМИ</b>';
     if(/^Прогрессия:$/i.test(t))return '📈 <b>ПРОГРЕССИЯ</b>';
     if(/^Основной принцип:$/i.test(t))return '🎯 <b>ОСНОВНОЙ ПРИНЦИП</b>';
+    if(/^RIR:$/i.test(t))return '🎚 <b>RIR</b>';
+    if(/^При накоплении выраженной усталости:$/i.test(t))return '🔄 <b>ПРИ НАКОПЛЕНИИ УСТАЛОСТИ</b>';
     return esc(line);
-  }).join('\n');
+  }).join('\\n').replace(/\\n{3,}/g,'\\n\\n');
 }
-
+function formatExerciseLine(e:any,index:number){
+  const details=[String(e.sets)+' × '+String(e.reps)];
+  if(e.rest_seconds!==null && e.rest_seconds!==undefined)details.push('отдых '+e.rest_seconds+' сек.');
+  if(e.rir!==null && e.rir!==undefined)details.push('RIR '+e.rir);
+  const lines=[(index+1)+'. <b>'+esc(e.name)+'</b>'];
+  if(e.muscle_group)lines.push('   💪 '+esc(e.muscle_group));
+  lines.push('   '+details.join(' · '));
+  if(e.comment && !/^Отдых:/i.test(String(e.comment)))lines.push('   📝 '+esc(normalizeProgramText(String(e.comment))));
+  return lines.join('\\n');
+}
 function programText(p:TrainingProgram|Omit<TrainingProgram,'created_at'|'updated_at'>,days:TrainingProgramDay[]){
   const lines=['🏋️ <b>'+esc(p.name)+'</b>'];
   if(p.goal)lines.push('','🎯 <b>ЦЕЛЬ</b>',esc(normalizeProgramText(p.goal)));
   if(days.length){
     lines.push('','📅 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>');
-    for(const d of days)lines.push('','День '+d.day_number+' — '+esc(d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'').trim()));
+    for(const d of days){
+      const clean=d.name.replace(/^День\\s*\\d+\\s*[—-]?\\s*/i,'').trim();
+      lines.push('','🏋️ <b>ДЕНЬ '+d.day_number+' — '+esc(clean||d.name)+'</b>');
+      if(d.comment)lines.push('   📌 '+esc(normalizeProgramText(d.comment)));
+    }
   }else lines.push('','📅 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>','Не добавлены');
   if(p.duration_weeks)lines.push('','⏱ <b>СРОК</b> — '+p.duration_weeks+' нед.');
   if(p.comment){
     const formatted=formatProgramComment(p.comment);
     if(formatted)lines.push('',formatted);
   }
-  return lines.join('\n');
+  return lines.join('\\n');
 }
-function dayTitle(d:TrainingProgramDay){const clean=d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'').trim();return `🏋️ <b>ДЕНЬ ${d.day_number} — ${esc(clean||d.name)}</b>`;}
+function dayTitle(d:TrainingProgramDay){const clean=d.name.replace(/^День\\s*\\d+\\s*[—-]?\\s*/i,'').trim();return '🏋️ <b>ДЕНЬ '+d.day_number+' — '+esc(clean||d.name)+'</b>';}
 function templateProgramText(t:any,days:any[],exercisesByDay:Record<number,any[]>){
   const lines=['📚 <b>'+esc(t.name)+'</b>'];
   if(t.goal)lines.push('','🎯 <b>ЦЕЛЬ</b>',esc(normalizeProgramText(t.goal)));
@@ -284,22 +300,19 @@ function templateProgramText(t:any,days:any[],exercisesByDay:Record<number,any[]
     if(formatted)lines.push('',formatted);
   }
   if(days.length){
-    lines.push('','📅 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>');
+    lines.push('','🏋️ <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>');
     for(const d of days){
-      const clean=d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'').trim();
-      lines.push('','🏋️ <b>ДЕНЬ '+d.day_number+' — '+esc(clean||d.name)+'</b>');
-      if(d.comment)lines.push('   '+esc(normalizeProgramText(d.comment)));
+      const clean=d.name.replace(/^День\\s*\\d+\\s*[—-]?\\s*/i,'').trim();
+      lines.push('','━━━━━━━━━━━━','🏋️ <b>ДЕНЬ '+d.day_number+' — '+esc(clean||d.name)+'</b>');
+      if(d.comment)lines.push('   📌 <b>ФОКУС:</b> '+esc(normalizeProgramText(d.comment)));
       const ex=exercisesByDay[d.id]||[];
       if(!ex.length){lines.push('   Упражнения не добавлены');continue;}
-      ex.forEach((e:any,i:number)=>{
-        const details=[e.sets+' × '+e.reps];
-        if(e.rest_seconds!==null)details.push('отдых '+e.rest_seconds+' сек.');
-        if(e.rir!==null)details.push('RIR '+e.rir);
-        lines.push((i+1)+'. <b>'+esc(e.name)+'</b>'+(e.muscle_group?' — '+esc(e.muscle_group):''),'   '+details.join(' · '));
-      });
+      lines.push('');
+      ex.forEach((e:any,i:number)=>lines.push(formatExerciseLine(e,i)));
     }
+    lines.push('','━━━━━━━━━━━━');
   }
-  return lines.join('\n');
+  return lines.join('\\n').replace(/\\n{3,}/g,'\\n\\n');
 }
 async function showProgram(ctx:Context,id:number){
   const c=await getClient(id);if(!c)return render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));
