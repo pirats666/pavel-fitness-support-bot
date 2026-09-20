@@ -29,3 +29,30 @@ export type AddSession = {
   step: AddStep;
   draft: Partial<ClientDraft>;
 };
+
+export type AssessmentLevel = 'Новичок' | 'Начальный' | 'Средний' | 'Продвинутый';
+export type AssessmentRating = 'Низкие' | 'Средние' | 'Хорошие' | 'Высокие';
+export type MobilityRating = 'Ограниченная' | 'Средняя' | 'Хорошая';
+export type CoordinationRating = 'Требует развития' | 'Средняя' | 'Хорошая';
+export type MovementRating = 'Хорошо' | 'Удовлетворительно' | 'Требует внимания';
+export type PrimaryAssessment = {
+  client_id: number;
+  fitness_level: AssessmentLevel | null;
+  strength: AssessmentRating | null;
+  endurance: AssessmentRating | null;
+  mobility: MobilityRating | null;
+  coordination: CoordinationRating | null;
+  squat: MovementRating | null;
+  hip_hinge: MovementRating | null;
+  horizontal_press: MovementRating | null;
+  horizontal_pull: MovementRating | null;
+  vertical_press: MovementRating | null;
+  vertical_pull: MovementRating | null;
+  core: MovementRating | null;
+  weaknesses: string | null;
+  strengths: string | null;
+  attention: string | null;
+  trainer_comment: string | null;
+  created_at: string;
+  updated_at: string;
+};
