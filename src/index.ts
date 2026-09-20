@@ -300,12 +300,13 @@ bot.callbackQuery(/^program:edit-ex-change:(\\d+)$/,async ctx=>{
   const exId=Number(ctx.match[1]);await ctx.answerCallbackQuery();
   const e=await getTrainingProgramExercise(exId);if(!e)return;
   const muscles=await listProgramCatalogMuscles();const kb=new InlineKeyboard();
-  for(const m of muscles)kb.text('💪 '+m,'program:muscle:'+exId+':'+encodeURIComponent(m)).row();
+  for(let i=0;i<muscles.length;i++)kb.text('💪 '+muscles[i],'program:muscle:'+exId+':'+i).row();
   kb.text('⬅️ Назад','program:edit:'+e.client_id);
   await render(ctx,'🔄 <b>Выберите мышечную группу</b>',kb);
 });
 bot.callbackQuery(/^program:muscle:(\\d+):(.+)$/,async ctx=>{
-  const exId=Number(ctx.match[1]),muscle=decodeURIComponent(ctx.match[2]);await ctx.answerCallbackQuery();
+  const exId=Number(ctx.match[1]),muscleIndex=Number(ctx.match[2]);await ctx.answerCallbackQuery();
+  const muscles=await listProgramCatalogMuscles();const muscle=muscles[muscleIndex];if(!muscle)return;
   const e=await getTrainingProgramExercise(exId);if(!e)return;
   const exercises=await listProgramCatalogExercises(muscle);const kb=new InlineKeyboard();
   for(const x of exercises)kb.text('🏋️ '+x.name,'program:pick-ex:'+exId+':'+x.id).row();
