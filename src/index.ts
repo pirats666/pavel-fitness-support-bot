@@ -352,9 +352,10 @@ bot.callbackQuery(/^program:day:(\d+)$/,async ctx=>{
   const ex=await listTrainingProgramExercises(dayId);
   const lines=[dayTitle(d),''];
   ex.forEach((e,i)=>lines.push((i+1)+'. <b>'+esc(e.name)+'</b>'+(e.muscle_group?' — '+esc(e.muscle_group):'')+'\n   '+e.sets+' × '+esc(e.reps)+(e.rest_seconds!==null?' · отдых '+e.rest_seconds+' сек.':'')+(e.rir!==null?' · RIR '+e.rir:'')+(e.comment&&!/^Отдых:/i.test(e.comment)?'\n   📝 '+esc(e.comment):'')));
-  const kb=new InlineKeyboard().text('✏️ Скорректировать день','program:edit-day:'+dayId).row();
-  for(const e of ex)kb.text('🏋️ '+e.name,'program:edit-ex:'+e.id).row();
-  kb.text('⬅️ К тренировочным дням','program:days:'+d.client_id).row().text('⬅️ К программе','program:'+d.client_id);
+  const kb=new InlineKeyboard()
+    .text('✏️ Скорректировать день','program:edit-day:'+dayId).row()
+    .text('⬅️ К тренировочным дням','program:days:'+d.client_id).row()
+    .text('⬅️ К программе','program:'+d.client_id);
   await render(ctx,lines.join('\n'),kb);
 });
 bot.callbackQuery(/^program:edit-day:(\d+)$/,async ctx=>{
