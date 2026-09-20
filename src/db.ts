@@ -1,5 +1,5 @@
 import pg from 'pg';
-import type { Client, ClientDraft } from './types.js';
+import type { Client, ClientDraft, PrimaryAssessment } from './types.js';
 
 const { Pool } = pg;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -49,6 +49,41 @@ export async function migrateStage1Schema(): Promise<void> {
   await pool.query(`ALTER TABLE public.clients ADD CONSTRAINT clients_height_cm_check CHECK (height_cm > 0 AND height_cm <= 300)`);
   await pool.query(`ALTER TABLE public.clients ADD CONSTRAINT clients_weight_kg_check CHECK (weight_kg > 0 AND weight_kg <= 500)`);
   await pool.query(`ALTER TABLE public.clients ADD CONSTRAINT clients_workouts_per_week_check CHECK (workouts_per_week >= 2 AND workouts_per_week <= 5)`);
+}
+
+export async function migrateStage2AssessmentSchema(): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.primary_assessments (
+      client_id BIGINT PRIMARY KEY REFERENCES public.clients(id) ON DELETE CASCADE,
+      fitness_level TEXT, strength TEXT, endurance TEXT, mobility TEXT, coordination TEXT,
+      squat TEXT, hip_hinge TEXT, horizontal_press TEXT, horizontal_pull TEXT,
+      vertical_press TEXT, vertical_pull TEXT, core TEXT,
+      weaknesses TEXT, strengths TEXT, attention TEXT, trainer_comment TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+}
+export async function getPrimaryAssessment(clientId: number): Promise<PrimaryAssessment | null> {
+  const { rows } = await pool.query<PrimaryAssessment>('SELECT * FROM public.primary_assessments WHERE client_id = $1',[clientId]);
+  return rows[0] ?? null;
+}
+export async function upsertPrimaryAssessment(a: Omit<PrimaryAssessment,'created_at'|'updated_at'>): Promise<PrimaryAssessment> {
+  const { rows } = await pool.query<PrimaryAssessment>(`
+    INSERT INTO public.primary_assessments
+      (client_id,fitness_level,strength,endurance,mobility,coordination,squat,hip_hinge,horizontal_press,horizontal_pull,vertical_press,vertical_pull,core,weaknesses,strengths,attention,trainer_comment)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+    ON CONFLICT (client_id) DO UPDATE SET
+      fitness_level=EXCLUDED.fitness_level,strength=EXCLUDED.strength,endurance=EXCLUDED.endurance,
+      mobility=EXCLUDED.mobility,coordination=EXCLUDED.coordination,squat=EXCLUDED.squat,hip_hinge=EXCLUDED.hip_hinge,
+      horizontal_press=EXCLUDED.horizontal_press,horizontal_pull=EXCLUDED.horizontal_pull,
+      vertical_press=EXCLUDED.vertical_press,vertical_pull=EXCLUDED.vertical_pull,core=EXCLUDED.core,
+      weaknesses=EXCLUDED.weaknesses,strengths=EXCLUDED.strengths,attention=EXCLUDED.attention,
+      trainer_comment=EXCLUDED.trainer_comment,updated_at=NOW()
+    RETURNING *`,[
+      a.client_id,a.fitness_level,a.strength,a.endurance,a.mobility,a.coordination,a.squat,a.hip_hinge,
+      a.horizontal_press,a.horizontal_pull,a.vertical_press,a.vertical_pull,a.core,a.weaknesses,a.strengths,a.attention,a.trainer_comment
+    ]);
+  return rows[0];
 }
 export async function listClients(): Promise<Client[]> {
   const { rows } = await pool.query<Client>('SELECT * FROM public.clients ORDER BY created_at DESC, id DESC');
