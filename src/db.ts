@@ -477,6 +477,81 @@ export async function migrateStage4TemplateSchema(): Promise<void>{
     }
   }
 
+
+  const pushPullLegs3Comment=`График:
+Пн — PUSH
+Ср — PULL
+Пт — LEGS
+
+Между тренировками — день восстановления.
+
+Прогрессия:
+Использовать двойную прогрессию.
+
+Пример:
+3 × 8 → 3 × 9 → 3 × 10
+↓
+увеличить вес
+↓
+вернуться к 3 × 7–8
+
+Вес увеличивать только при сохранении
+техники выполнения и заданного RIR.
+
+RIR:
+• Базовые упражнения — 2–3
+• Изоляция — 1–2`;
+  const pushPullLegs3=await pool.query(`INSERT INTO public.coach_training_program_templates(name,goal,duration_weeks,comment)
+    VALUES($1,$2,NULL,$3) ON CONFLICT(name) DO UPDATE SET goal=EXCLUDED.goal,comment=EXCLUDED.comment,updated_at=NOW() RETURNING id`,
+    ['Базовая программа Push / Pull / Legs — 3 дня в неделю','Развитие силы и мышечной массы при трёх тренировках в неделю',pushPullLegs3Comment]);
+  const pushPullLegs3Id=pushPullLegs3.rows[0].id;
+  const pushPullLegs3Count=await pool.query('SELECT COUNT(*)::int AS count FROM public.coach_training_program_template_days WHERE template_id=$1',[pushPullLegs3Id]);
+  if(pushPullLegs3Count.rows[0].count===0){
+    const pushPullLegs3Days=[
+      ['День 1 — PUSH','Грудь + плечи + трицепс'],
+      ['День 2 — PULL','Спина + задняя дельта + бицепс'],
+      ['День 3 — LEGS','Квадрицепс + задняя поверхность бедра + ягодицы + икры']
+    ];
+    const pushPullLegs3Ex=[
+      [
+        ['Жим штанги лёжа','Грудь, трицепс, передняя дельта',3,'6–10',150,2],
+        ['Жим гантелей на наклонной скамье','Верх груди, трицепс, передняя дельта',3,'8–12',150,2],
+        ['Жим гантелей сидя','Плечи, трицепс',3,'8–12',150,2],
+        ['Разведения гантелей в стороны','Средняя дельта',3,'12–15',75,1],
+        ['Сведение рук в кроссовере','Грудь',2,'12–15',75,1],
+        ['Разгибание рук на верхнем блоке','Трицепс',3,'10–15',75,1],
+        ['Разгибание рук с канатом из-за головы','Трицепс',2,'10–15',75,1]
+      ],
+      [
+        ['Подтягивания / тяга верхнего блока','Широчайшие, бицепс',3,'6–10',150,2],
+        ['Тяга штанги в наклоне','Широчайшие, ромбовидные, задняя дельта, бицепс',3,'6–10',150,2],
+        ['Тяга горизонтального блока','Широчайшие, ромбовидные, задняя дельта, бицепс',3,'8–12',150,2],
+        ['Тяга гантели одной рукой','Широчайшие, ромбовидные, бицепс',2,'8–12',150,2],
+        ['Обратная бабочка','Задняя дельта',3,'12–15',75,1],
+        ['Подъём штанги на бицепс','Бицепс',3,'8–12',75,1],
+        ['Молотковые сгибания','Бицепс, плечелучевая мышца',2,'10–15',75,1],
+        ['Гиперэкстензия','Разгибатели позвоночника, ягодичные, задняя поверхность бедра',2,'10–15',90,1]
+      ],
+      [
+        ['Присед со штангой','Квадрицепс, ягодичные',3,'6–10',150,2],
+        ['Румынская тяга','Задняя поверхность бедра, ягодичные',3,'8–12',150,2],
+        ['Жим ногами','Квадрицепс, ягодичные',3,'10–12',150,2],
+        ['Болгарские выпады','Квадрицепс, ягодичные',2,'8–12 на каждую ногу',120,2],
+        ['Сгибание ног в тренажёре','Задняя поверхность бедра',3,'10–15',75,1],
+        ['Разгибание ног в тренажёре','Квадрицепс',2,'10–15',75,1],
+        ['Подъёмы на носки','Икроножные',3,'12–15',75,1],
+        ['Скручивания','Мышцы кора',3,'12–20',60,1]
+      ]
+    ];
+    for(let i=0;i<pushPullLegs3Days.length;i++){
+      const d=await pool.query('INSERT INTO public.coach_training_program_template_days(template_id,day_number,name,comment) VALUES($1,$2,$3,$4) RETURNING id',[pushPullLegs3Id,i+1,pushPullLegs3Days[i][0],pushPullLegs3Days[i][1]]);
+      for(let j=0;j<pushPullLegs3Ex[i].length;j++){
+        const e=pushPullLegs3Ex[i][j];
+        await pool.query('INSERT INTO public.coach_training_program_template_exercises(day_id,exercise_order,name,muscle_group,sets,reps,rest_seconds,rir,comment) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULL)',[d.rows[0].id,j+1,...e]);
+      }
+    }
+  }
+}
 export async function listTrainingProgramTemplates():Promise<TrainingProgramTemplate[]>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates ORDER BY name');return rows;}
 export async function getTrainingProgramTemplate(id:number):Promise<TrainingProgramTemplate|null>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates WHERE id=$1',[id]);return rows[0]??null;}
 export async function listTrainingProgramTemplateDays(templateId:number):Promise<TrainingProgramTemplateDay[]>{const {rows}=await pool.query<TrainingProgramTemplateDay[]>('SELECT * FROM public.coach_training_program_template_days WHERE template_id=$1 ORDER BY day_number',[templateId]);return rows as any;}
