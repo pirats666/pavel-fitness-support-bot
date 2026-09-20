@@ -341,6 +341,15 @@ bot.on('message:text',async ctx=>{
       if(s.step==='comment'){s.program.comment=t==='Нет'?null:t;return render(ctx,'🏋️ <b>Проверьте программу</b>\\n\\n'+programText(s.program,[]),new InlineKeyboard().text('💾 Сохранить','program:save:'+s.clientId).row().text('❌ Отмена','program:cancel:'+s.clientId));}
     }
     if(s.kind==='day'&&s.step==='name'){const d=await createTrainingProgramDay(s.clientId,t);programSessions.delete(uid);return render(ctx,'✅ День добавлен.\\n\\n🏋️ '+esc(d.name),new InlineKeyboard().text('➕ Добавить упражнение','program:exercise:new:'+d.id).row().text('⬅️ К программе','program:'+s.clientId));}
+    if(s.kind==='exercise-edit'&&s.exercise&&s.exerciseId){
+      if(s.step==='name'){s.exercise.name=t;s.step='muscle';return ctx.reply('Введите мышечную группу:');}
+      if(s.step==='muscle'){s.exercise.muscle_group=t==='Нет'?null:t;s.step='sets';return ctx.reply('Введите количество подходов:');}
+      if(s.step==='sets'){const n=Number(t.trim());if(!Number.isInteger(n)||n<1||n>20)return ctx.reply('❌ Введите количество подходов целым числом от 1 до 20.');s.exercise.sets=n;s.step='reps';return ctx.reply('Введите количество повторений (например, 8-10):');}
+      if(s.step==='reps'){s.exercise.reps=t;s.step='rest';return ctx.reply('Введите отдых в секундах или «Нет»:');}
+      if(s.step==='rest'){if(t==='Нет')s.exercise.rest_seconds=null;else{const n=Number(t.trim());if(!Number.isInteger(n)||n<0||n>900)return ctx.reply('❌ Введите отдых целым числом от 0 до 900 секунд или «Нет».');s.exercise.rest_seconds=n;}s.step='rir';return ctx.reply('Введите RIR от 0 до 5 или «Нет»:');}
+      if(s.step==='rir'){if(t==='Нет')s.exercise.rir=null;else{const n=Number(t.trim());if(!Number.isFinite(n)||n<0||n>5)return ctx.reply('❌ Введите RIR от 0 до 5 или «Нет».');s.exercise.rir=n;}s.step='comment';return ctx.reply('Введите комментарий или «Нет»:');}
+      if(s.step==='comment'){s.exercise.comment=t==='Нет'?null:t;const ex=await updateTrainingProgramExercise({id:s.exerciseId,name:String(s.exercise.name),muscle_group:s.exercise.muscle_group??null,sets:Number(s.exercise.sets),reps:String(s.exercise.reps),rest_seconds:s.exercise.rest_seconds??null,rir:s.exercise.rir??null,comment:s.exercise.comment??null});programSessions.delete(uid);if(!ex)return ctx.reply('❌ Не удалось сохранить упражнение.');return render(ctx,'✅ Упражнение скорректировано и сохранено.',new InlineKeyboard().text('⬅️ К тренировке','program:day:'+ex.day_id));}
+    }
     if(s.kind==='exercise'&&s.exercise){
       if(s.step==='name'){s.exercise.name=t;s.step='muscle';return ctx.reply('Введите мышечную группу:');}
       if(s.step==='muscle'){s.exercise.muscle_group=t==='Нет'?null:t;s.step='sets';return ctx.reply('Введите количество подходов:');}
