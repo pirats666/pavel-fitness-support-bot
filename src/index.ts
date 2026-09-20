@@ -245,8 +245,11 @@ async function showStrategy(ctx:Context,id:number){
   return render(ctx,strategyText(s),new InlineKeyboard().text('✏️ Изменить','strategy:edit:'+id).row().text('⬅️ Назад к клиенту','client:view:'+id));
 }
 
+function normalizeProgramText(value:string){
+  return value.split('\\\\n').join('\n').split('/n').join('\n').trim();
+}
 function formatProgramComment(comment:string){
-  const normalized=comment.replace(/\\n/g,'\n').replace(/\/n/g,'\n').trim();
+  const normalized=normalizeProgramText(comment);
   return normalized.split('\n').map(line=>{
     const t=line.trim();
     if(!t)return '';
@@ -260,7 +263,7 @@ function formatProgramComment(comment:string){
 
 function programText(p:TrainingProgram|Omit<TrainingProgram,'created_at'|'updated_at'>,days:TrainingProgramDay[]){
   const lines=['🏋️ <b>'+esc(p.name)+'</b>'];
-  if(p.goal)lines.push('','🎯 <b>ЦЕЛЬ</b>',esc(p.goal.replace(/\\n/g,'\n').replace(/\/n/g,'\n')));
+  if(p.goal)lines.push('','🎯 <b>ЦЕЛЬ</b>',esc(normalizeProgramText(p.goal)));
   if(days.length){
     lines.push('','📅 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>');
     for(const d of days)lines.push('','День '+d.day_number+' — '+esc(d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'').trim()));
@@ -268,7 +271,7 @@ function programText(p:TrainingProgram|Omit<TrainingProgram,'created_at'|'update
   if(p.duration_weeks)lines.push('','⏱ <b>СРОК</b> — '+p.duration_weeks+' нед.');
   if(p.comment){
     const formatted=formatProgramComment(p.comment);
-    if(formatted)lines.push('','📝 <b>ПРАВИЛА И КОММЕНТАРИЙ</b>','',formatted);
+    if(formatted)lines.push('',formatted);
   }
   return lines.join('\n');
 }
