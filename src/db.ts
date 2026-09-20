@@ -1,5 +1,5 @@
 import pg from 'pg';
-import type { Client, ClientDraft, PrimaryAssessment } from './types.js';
+import type { Client, ClientDraft, PrimaryAssessment, TrainingStrategy } from './types.js';
 
 const { Pool } = pg;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -83,6 +83,45 @@ export async function upsertPrimaryAssessment(a: Omit<PrimaryAssessment,'created
       a.client_id,a.fitness_level,a.strength,a.endurance,a.mobility,a.coordination,a.squat,a.hip_hinge,
       a.horizontal_press,a.horizontal_pull,a.vertical_press,a.vertical_pull,a.core,a.weaknesses,a.strengths,a.attention,a.trainer_comment
     ]);
+  return rows[0];
+}
+export async function migrateStage3StrategySchema(): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.training_strategies (
+      client_id BIGINT PRIMARY KEY REFERENCES public.clients(id) ON DELETE CASCADE,
+      main_task TEXT,
+      priorities TEXT,
+      what_to_account_for TEXT,
+      main_focus TEXT,
+      trainer_decision TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+}
+export async function getTrainingStrategy(clientId: number): Promise<TrainingStrategy | null> {
+  const { rows } = await pool.query<TrainingStrategy>(
+    'SELECT * FROM public.training_strategies WHERE client_id = $1',[clientId]
+  );
+  return rows[0] ?? null;
+}
+export async function upsertTrainingStrategy(
+  s: Omit<TrainingStrategy,'created_at'|'updated_at'>
+): Promise<TrainingStrategy> {
+  const { rows } = await pool.query<TrainingStrategy>(`
+    INSERT INTO public.training_strategies
+      (client_id,main_task,priorities,what_to_account_for,main_focus,trainer_decision)
+    VALUES ($1,$2,$3,$4,$5,$6)
+    ON CONFLICT (client_id) DO UPDATE SET
+      main_task=EXCLUDED.main_task,
+      priorities=EXCLUDED.priorities,
+      what_to_account_for=EXCLUDED.what_to_account_for,
+      main_focus=EXCLUDED.main_focus,
+      trainer_decision=EXCLUDED.trainer_decision,
+      updated_at=NOW()
+    RETURNING *
+  `,[
+    s.client_id,s.main_task,s.priorities,s.what_to_account_for,s.main_focus,s.trainer_decision
+  ]);
   return rows[0];
 }
 export async function listClients(): Promise<Client[]> {
