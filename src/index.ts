@@ -246,7 +246,15 @@ async function showStrategy(ctx:Context,id:number){
 }
 
 function programText(p:TrainingProgram|Omit<TrainingProgram,'created_at'|'updated_at'>,days:TrainingProgramDay[]){
-  return ['🏋️ <b>ТРЕНИРОВОЧНАЯ ПРОГРАММА</b>','',`📌 Название: ${esc(p.name)}`,`🎯 Цель: ${esc(p.goal)||'Не заполнено'}`,`⏱ Срок: ${p.duration_weeks?p.duration_weeks+' нед.':'Не заполнено'}`,`📝 Комментарий: ${esc(p.comment)||'Не заполнено'}`,'',`📅 Дней: ${days.length}`,...days.map(d=>`🏋️ День ${d.day_number}: ${esc(d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,''))}`)].join('\n');
+  const lines=['🏋️ <b>'+esc(p.name)+'</b>'];
+  if(p.goal) lines.push('', '🎯 <b>Цель</b>\\n'+esc(p.goal));
+  if(days.length){
+    lines.push('', '📅 <b>График</b>');
+    for(const d of days) lines.push('День '+d.day_number+' — '+esc(d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'')));
+  } else lines.push('', '📅 Дней: 0');
+  if(p.duration_weeks) lines.push('', '⏱ <b>Срок</b> — '+p.duration_weeks+' нед.');
+  if(p.comment) lines.push('', '📝 <b>Правила и комментарий</b>\\n'+esc(p.comment));
+  return lines.join('\\n');
 }
 function dayTitle(d:TrainingProgramDay){const clean=d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'').trim();return `🏋️ <b>ДЕНЬ ${d.day_number} — ${esc(clean||d.name)}</b>`;}
 async function showProgram(ctx:Context,id:number){
