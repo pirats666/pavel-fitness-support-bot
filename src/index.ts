@@ -398,6 +398,12 @@ bot.on('message:text',async ctx=>{
   }
 
   const programSession=programSessions.get(uid);
+  if(programSession?.kind==='program-edit'&&programSession.step==='edit-name'&&programSession.program){
+    if(!t)return ctx.reply('Введите название программы.');
+    programSession.program.name=t;
+    programSession.step='edit-menu';
+    return showProgramEditor(ctx,programSession.clientId);
+  }
   if(programSession){
     const s=programSession;
     if(!t)return ctx.reply('Введите значение текстом.');
