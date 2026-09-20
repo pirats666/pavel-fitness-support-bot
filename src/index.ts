@@ -338,7 +338,7 @@ bot.callbackQuery(/^program:edit-save:(\d+)$/,async ctx=>{
 });
 bot.callbackQuery(/^program:cancel:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();programSessions.delete(ctx.from!.id);await showProgram(ctx,id);});
 bot.callbackQuery(/^program:skipgoal:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);const s=programSessions.get(ctx.from!.id);if(!s||s.kind!=='program'||!s.program)return;await ctx.answerCallbackQuery();s.program.goal=null;s.step='duration';await render(ctx,'Введите срок программы в неделях:',new InlineKeyboard().text('⏭ Пропустить','program:skipduration:'+s.clientId).row().text('❌ Отмена','program:cancel:'+s.clientId));});
-bot.callbackQuery(/^program:days:(\\d+)$/,async ctx=>{
+bot.callbackQuery(/^program:days:(\d+)$//,async ctx=>{
   const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();
   const days=await listTrainingProgramDays(id);
   const kb=new InlineKeyboard();
@@ -346,7 +346,7 @@ bot.callbackQuery(/^program:days:(\\d+)$/,async ctx=>{
   kb.text('⬅️ К программе','program:'+id);
   await render(ctx,days.length?'📋 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>\\n\\nВыберите день:':'📋 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>\\n\\nДни пока не созданы.',kb);
 });
-bot.callbackQuery(/^program:day:(\\d+)$/,async ctx=>{
+bot.callbackQuery(/^program:day:(\d+)$/,async ctx=>{
   const dayId=Number(ctx.match[1]);await ctx.answerCallbackQuery();
   const d=await getTrainingProgramDay(dayId);if(!d)return;
   const ex=await listTrainingProgramExercises(dayId);
@@ -357,7 +357,7 @@ bot.callbackQuery(/^program:day:(\\d+)$/,async ctx=>{
   kb.text('⬅️ К тренировочным дням','program:days:'+d.client_id).row().text('⬅️ К программе','program:'+d.client_id);
   await render(ctx,lines.join('\\n'),kb);
 });
-bot.callbackQuery(/^program:edit-day:(\\d+)$/,async ctx=>{
+bot.callbackQuery(/^program:edit-day:(\d+)$/,async ctx=>{
   const dayId=Number(ctx.match[1]);await ctx.answerCallbackQuery();
   const d=await getTrainingProgramDay(dayId);if(!d)return;
   const ex=await listTrainingProgramExercises(dayId);
@@ -367,7 +367,7 @@ bot.callbackQuery(/^program:edit-day:(\\d+)$/,async ctx=>{
   kb.text('⬅️ К дню','program:day:'+dayId).row().text('⬅️ К программе','program:'+d.client_id);
   await render(ctx,dayTitle(d)+'\\n\\n✏️ <b>Корректировка дня</b>\\n\\nВыберите упражнение:',kb);
 });
-bot.callbackQuery(/^program:exercise:new:(\\d+)$/,async ctx=>{
+bot.callbackQuery(/^program:exercise:new:(\d+)$/,async ctx=>{
   const dayId=Number(ctx.match[1]);await ctx.answerCallbackQuery();
   const d=await getTrainingProgramDay(dayId);if(!d)return;
   programSessions.set(ctx.from!.id,{clientId:d.client_id,kind:'exercise',step:'name',dayId,exercise:{day_id:dayId}});
