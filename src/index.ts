@@ -248,10 +248,10 @@ async function showStrategy(ctx:Context,id:number){
 
 function normalizeProgramText(value:string){
   return String(value ?? '')
-    .replace(/\\r\\n/g,'\\n')
-    .replace(/\\\\n/g,'\\n')
-    .replace(/\\/n/g,'\\n')
-    .replace(/\\n{3,}/g,'\\n\\n')
+    .replace(/\r\n/g,'\n')
+    .replace(/\\n/g,'\n')
+    .replace(/\/n/g,'\n')
+    .replace(/\n{3,}/g,'\n\n')
     .trim();
 }
 function formatProgramComment(comment:string){
@@ -285,7 +285,7 @@ function programText(p:TrainingProgram|Omit<TrainingProgram,'created_at'|'update
   if(days.length){
     lines.push('','📅 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>');
     for(const d of days){
-      const clean=d.name.replace(/^День\\s*\\d+\\s*[—-]?\\s*/i,'').trim();
+      const clean=d.name.replace(/^(?:День\\s*\\d+\\s*[—-]?\\s*)+/i,'').trim();
       lines.push('','🏋️ <b>ДЕНЬ '+d.day_number+' — '+esc(clean||d.name)+'</b>');
       if(d.comment)lines.push('   📌 '+esc(normalizeProgramText(d.comment)));
     }
@@ -297,7 +297,7 @@ function programText(p:TrainingProgram|Omit<TrainingProgram,'created_at'|'update
   }
   return lines.join('\\n');
 }
-function dayTitle(d:TrainingProgramDay){const clean=d.name.replace(/^День\\s*\\d+\\s*[—-]?\\s*/i,'').trim();return '🏋️ <b>ДЕНЬ '+d.day_number+' — '+esc(clean||d.name)+'</b>';}
+function dayTitle(d:TrainingProgramDay){const clean=d.name.replace(/^(?:День\\s*\\d+\\s*[—-]?\\s*)+/i,'').trim();return '🏋️ <b>ДЕНЬ '+d.day_number+' — '+esc(clean||d.name)+'</b>';}
 function templateProgramText(t:any,days:any[],exercisesByDay:Record<number,any[]>){
   const lines=['📚 <b>'+esc(t.name)+'</b>'];
   if(t.goal)lines.push('','🎯 <b>ЦЕЛЬ</b>',esc(normalizeProgramText(t.goal)));
@@ -308,7 +308,7 @@ function templateProgramText(t:any,days:any[],exercisesByDay:Record<number,any[]
   if(days.length){
     lines.push('','🏋️ <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>');
     for(const d of days){
-      const clean=d.name.replace(/^День\\s*\\d+\\s*[—-]?\\s*/i,'').trim();
+      const clean=d.name.replace(/^(?:День\\s*\\d+\\s*[—-]?\\s*)+/i,'').trim();
       lines.push('','━━━━━━━━━━━━','🏋️ <b>ДЕНЬ '+d.day_number+' — '+esc(clean||d.name)+'</b>');
       if(d.comment)lines.push('   📌 <b>ФОКУС:</b> '+esc(normalizeProgramText(d.comment)));
       const ex=exercisesByDay[d.id]||[];
