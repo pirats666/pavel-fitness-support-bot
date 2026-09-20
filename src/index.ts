@@ -272,9 +272,7 @@ async function showProgramEditor(ctx:Context,id:number){
   const kb=new InlineKeyboard()
     .text('✏️ Изменить название','program:edit-name:'+id).row();
   for(const d of days){
-    const ex=await listTrainingProgramExercises(d.id);
     kb.text(`📅 День ${d.day_number} — ${d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'')}`,'program:edit-day:'+d.id).row();
-    for(const e of ex)kb.text('🏋️ '+e.name,'program:edit-ex:'+e.id).row();
   }
   kb.text('💾 Сохранить программу','program:edit-save:'+id).row().text('❌ Отмена','program:'+id);
   await render(ctx,'✏️ <b>КОРРЕКТИРОВКА ПРОГРАММЫ</b>\n\n📌 <b>'+esc(p.name)+'</b>\n\nВыберите, что изменить:',kb);
@@ -342,7 +340,7 @@ bot.callbackQuery(/^program:days:(\d+)$/,async ctx=>{
   const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();
   const days=await listTrainingProgramDays(id);
   const kb=new InlineKeyboard();
-  for(const d of days)kb.text('🏋️ День '+d.day_number+' — '+d.name.replace(/^День\s*\\d+\s*[—-]?\s*/i,''),'program:day:'+d.id).row();
+  for(const d of days)kb.text('🏋️ День '+d.day_number+' — '+d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,''),'program:day:'+d.id).row();
   kb.text('⬅️ К программе','program:'+id);
   await render(ctx,days.length?'📋 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>\n\nВыберите день:':'📋 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>\n\nДни пока не созданы.',kb);
 });
