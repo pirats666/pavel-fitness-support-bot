@@ -722,7 +722,7 @@ RIR:
 export async function listTrainingProgramTemplates():Promise<TrainingProgramTemplate[]>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates ORDER BY name');return rows;}
 export async function getTrainingProgramTemplate(id:number):Promise<TrainingProgramTemplate|null>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates WHERE id=$1',[id]);return rows[0]??null;}
 export async function listTrainingProgramTemplateDays(templateId:number):Promise<TrainingProgramTemplateDay[]>{const {rows}=await pool.query<TrainingProgramTemplateDay[]>('SELECT * FROM public.coach_training_program_template_days WHERE template_id=$1 ORDER BY day_number',[templateId]);return rows as any;}
-export async function listTrainingProgramTemplateExercises(dayId:number):Promise<TrainingProgramTemplateExercise[]>{const {rows}=await pool.query<TrainingProgramTemplateExercise[]>('SELECT * FROM public.coach_training_program_template_exercises WHERE day_id=$1 ORDER BY exercise_order');return rows as any;}
+export async function listTrainingProgramTemplateExercises(dayId:number):Promise<TrainingProgramTemplateExercise[]>{const {rows}=await pool.query<TrainingProgramTemplateExercise[]>('SELECT * FROM public.coach_training_program_template_exercises WHERE day_id=$1 ORDER BY exercise_order',[dayId]);return rows as any;}
 export async function applyTrainingProgramTemplate(clientId:number,templateId:number):Promise<TrainingProgram>{
   const c=await pool.connect();
   try{
