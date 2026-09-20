@@ -409,6 +409,74 @@ export async function migrateStage4TemplateSchema(): Promise<void>{
     }
   }
 
+  const pushPull2Comment=`График:
+Пн — PUSH
+Чт — PULL
+
+Между тренировками — минимум 2 дня восстановления.
+
+Интенсивность:
+• Базовые упражнения — RIR 2–3
+• Изоляция — RIR 1–2
+• База — отдых 2–3 мин
+• Изоляция — отдых 60–90 сек
+
+Прогрессия:
+Использовать двойную прогрессию.
+
+Пример:
+3 × 8
+↓
+3 × 9
+↓
+3 × 10
+↓
+увеличить вес
+↓
+снова 3 × 7–8
+
+Рабочие подходы выполнять с сохранением техники
+и заданного RIR.`;
+  const pushPull2=await pool.query(`INSERT INTO public.coach_training_program_templates(name,goal,duration_weeks,comment)
+    VALUES($1,$2,NULL,$3) ON CONFLICT(name) DO UPDATE SET goal=EXCLUDED.goal,comment=EXCLUDED.comment,updated_at=NOW() RETURNING id`,
+    ['Базовая программа Push / Pull — 2 дня в неделю','Развитие силы и мышечной массы при двух тренировках в неделю',pushPull2Comment]);
+  const pushPull2Id=pushPull2.rows[0].id;
+  const pushPull2Count=await pool.query('SELECT COUNT(*)::int AS count FROM public.coach_training_program_template_days WHERE template_id=$1',[pushPull2Id]);
+  if(pushPull2Count.rows[0].count===0){
+    const pushPull2Days=[
+      ['День 1 — PUSH','Грудь + плечи + трицепс'],
+      ['День 2 — PULL','Спина + задняя дельта + бицепс']
+    ];
+    const pushPull2Ex=[
+      [
+        ['Жим штанги лёжа','Грудь, трицепс, передняя дельта',3,'6–10',150,2],
+        ['Жим гантелей на наклонной скамье','Верх груди, трицепс, передняя дельта',3,'8–12',150,2],
+        ['Жим гантелей сидя','Плечи, трицепс',3,'8–12',150,2],
+        ['Разведения гантелей в стороны','Средняя дельта',3,'12–15',75,1],
+        ['Сведение рук в кроссовере','Грудь',2,'12–15',75,1],
+        ['Разгибание рук на верхнем блоке','Трицепс',3,'10–15',75,1],
+        ['Разгибание рук с канатом из-за головы','Трицепс',2,'10–15',75,1]
+      ],
+      [
+        ['Подтягивания / тяга верхнего блока','Широчайшие, бицепс',3,'6–10',150,2],
+        ['Тяга штанги в наклоне','Широчайшие, ромбовидные, задняя дельта, бицепс',3,'6–10',150,2],
+        ['Тяга горизонтального блока','Широчайшие, ромбовидные, задняя дельта, бицепс',3,'8–12',150,2],
+        ['Тяга гантели одной рукой','Широчайшие, ромбовидные, бицепс',2,'8–12',150,2],
+        ['Обратные разведения / обратная бабочка','Задняя дельта',3,'12–15',75,1],
+        ['Подъём штанги на бицепс','Бицепс',3,'8–12',75,1],
+        ['Молотковые сгибания','Бицепс, плечелучевая мышца',2,'10–15',75,1],
+        ['Гиперэкстензия','Разгибатели позвоночника, ягодичные, задняя поверхность бедра',2,'10–15',90,1]
+      ]
+    ];
+    for(let i=0;i<pushPull2Days.length;i++){
+      const d=await pool.query('INSERT INTO public.coach_training_program_template_days(template_id,day_number,name,comment) VALUES($1,$2,$3,$4) RETURNING id',[pushPull2Id,i+1,pushPull2Days[i][0],pushPull2Days[i][1]]);
+      for(let j=0;j<pushPull2Ex[i].length;j++){
+        const e=pushPull2Ex[i][j];
+        await pool.query('INSERT INTO public.coach_training_program_template_exercises(day_id,exercise_order,name,muscle_group,sets,reps,rest_seconds,rir,comment) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULL)',[d.rows[0].id,j+1,...e]);
+      }
+    }
+  }
+
 export async function listTrainingProgramTemplates():Promise<TrainingProgramTemplate[]>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates ORDER BY name');return rows;}
 export async function getTrainingProgramTemplate(id:number):Promise<TrainingProgramTemplate|null>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates WHERE id=$1',[id]);return rows[0]??null;}
 export async function listTrainingProgramTemplateDays(templateId:number):Promise<TrainingProgramTemplateDay[]>{const {rows}=await pool.query<TrainingProgramTemplateDay[]>('SELECT * FROM public.coach_training_program_template_days WHERE template_id=$1 ORDER BY day_number',[templateId]);return rows as any;}
