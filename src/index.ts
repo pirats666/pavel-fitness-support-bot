@@ -336,6 +336,14 @@ bot.callbackQuery(/^program:edit-save:(\d+)$/,async ctx=>{
 });
 bot.callbackQuery(/^program:cancel:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();programSessions.delete(ctx.from!.id);await showProgram(ctx,id);});
 bot.callbackQuery(/^program:skipgoal:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);const s=programSessions.get(ctx.from!.id);if(!s||s.kind!=='program'||!s.program)return;await ctx.answerCallbackQuery();s.program.goal=null;s.step='duration';await render(ctx,'Введите срок программы в неделях:',new InlineKeyboard().text('⏭ Пропустить','program:skipduration:'+s.clientId).row().text('❌ Отмена','program:cancel:'+s.clientId));});
+bot.callbackQuery(/^program:day:new:(\d+)$/,async ctx=>{
+  const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();
+  const p=await getTrainingProgram(id);if(!p)return;
+  programSessions.set(ctx.from!.id,{clientId:id,kind:'day',step:'name',program:{client_id:id,name:p.name,goal:p.goal,duration_weeks:p.duration_weeks,comment:p.comment}});
+  const days=await listTrainingProgramDays(id);
+  const nextDay=days.length+1;
+  await render(ctx,'➕ <b>Добавление тренировочного дня</b>\n\nВведите название для Дня '+nextDay+':',new InlineKeyboard().text('❌ Отмена','program:'+id));
+});
 bot.callbackQuery(/^program:days:(\d+)$/,async ctx=>{
   const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();
   const days=await listTrainingProgramDays(id);
