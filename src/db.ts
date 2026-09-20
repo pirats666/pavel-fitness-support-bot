@@ -143,6 +143,35 @@ export async function migrateStage4ProgramSchema(): Promise<void> {
     UNIQUE(day_id,exercise_order)
   )`);
 }
+export async function seedBaseFullBodyProgram(clientId:number):Promise<void>{
+  const c=await pool.connect();
+  try{
+    await c.query('BEGIN');
+    await c.query(`INSERT INTO public.coach_training_programs(client_id,name,goal,duration_weeks,comment)
+      VALUES($1,$2,$3,NULL,$4)
+      ON CONFLICT(client_id) DO UPDATE SET name=EXCLUDED.name,goal=EXCLUDED.goal,duration_weeks=NULL,comment=EXCLUDED.comment,updated_at=NOW()`,
+      [clientId,'Full Body — 3 дня в неделю','Базовая сила, гипертрофия, силовая выносливость и полный двигательный баланс','График: Пн — Ср — Пт или Вт — Чт — Сб. Между тренировками — минимум 1 день восстановления.']);
+    await c.query('DELETE FROM public.coach_training_program_days WHERE client_id=$1',[clientId]);
+    const days=[
+      ['День 1 — базовая сила','Базовые многосуставные движения.'],
+      ['День 2 — гипертрофия и односторонняя работа','Гипертрофия, односторонняя работа и контроль движения.'],
+      ['День 3 — силовая выносливость и полный двигательный баланс','Полный двигательный баланс и силовая выносливость.']
+    ];
+    const exercises=[
+      [['Присед со штангой / гоблет-присед','Квадрицепс, ягодичные',3,'6–8',120,'Отдых: 2–3 мин'],['Жим лёжа','Грудь, трицепс',3,'6–8',120,'Отдых: 2–3 мин'],['Тяга горизонтального блока','Спина, задняя дельта, бицепс',3,'8–10',90,'Отдых: 90–120 сек'],['Румынская тяга','Задняя поверхность бедра, ягодичные',3,'8–10',120,'Отдых: 2 мин'],['Жим гантелей вверх','Плечи, трицепс',2,'8–10',90,'Отдых: 90 сек'],['Сгибание рук с гантелями','Бицепс',2,'10–12',60,'Отдых: 60–90 сек'],['Планка','Мышцы кора',2,'30–45 сек',60,'Отдых: 60 сек']],
+      [['Жим ногами','Квадрицепс, ягодичные',3,'8–12',120,'Отдых: 2 мин'],['Жим гантелей на наклонной скамье','Верх груди, трицепс, передняя дельта',3,'8–12',90,'Отдых: 90–120 сек'],['Тяга верхнего блока','Широчайшие, бицепс',3,'8–12',90,'Отдых: 90–120 сек'],['Болгарский сплит-присед','Квадрицепс, ягодичные',2,'8–10 на ногу',90,'Отдых: 90 сек'],['Разведения гантелей в стороны','Средняя дельта',2,'12–15',60,'Отдых: 60–90 сек'],['Сгибание ног в тренажёре','Задняя поверхность бедра',2,'10–15',60,'Отдых: 60–90 сек'],['Dead Bug','Мышцы кора',2,'8–12 на сторону',60,'Отдых: 60 сек']],
+      [['Трап-бар / классическая тяга','Ягодичные, задняя поверхность бедра, спина',3,'5–6',120,'Отдых: 2–3 мин'],['Жим в тренажёре / отжимания','Грудь, трицепс, передняя дельта',3,'8–12',90,'Отдых: 90–120 сек'],['Тяга гантели одной рукой','Широчайшие, ромбовидные, бицепс',3,'8–12',90,'Отдых: 90 сек'],['Выпады / шаги на платформу','Квадрицепс, ягодичные',2,'10–12 на ногу',90,'Отдых: 90 сек'],['Ягодичный мост','Ягодичные',2,'10–12',90,'Отдых: 90 сек'],['Face Pull','Задняя дельта, верх спины',2,'12–15',60,'Отдых: 60–90 сек'],['Pallof Press','Мышцы кора',2,'10–12 на сторону',60,'Отдых: 60 сек']]
+    ];
+    for(let i=0;i<days.length;i++){
+      const d=await c.query('INSERT INTO public.coach_training_program_days(client_id,day_number,name,comment) VALUES($1,$2,$3,$4) RETURNING id',[clientId,i+1,days[i][0],days[i][1]]);
+      for(let j=0;j<exercises[i].length;j++){
+        const e=exercises[i][j];
+        await c.query('INSERT INTO public.coach_training_program_exercises(day_id,exercise_order,name,muscle_group,sets,reps,rest_seconds,rir,comment) VALUES($1,$2,$3,$4,$5,$6,$7,NULL,$8)',[d.rows[0].id,j+1,...e]);
+      }
+    }
+    await c.query('COMMIT');
+  }catch(e){await c.query('ROLLBACK');throw e}finally{c.release()}
+}
 export async function getTrainingProgram(clientId:number):Promise<TrainingProgram|null>{const {rows}=await pool.query<TrainingProgram>('SELECT * FROM public.coach_training_programs WHERE client_id=$1',[clientId]);return rows[0]??null;}
 export async function upsertTrainingProgram(p:Omit<TrainingProgram,'created_at'|'updated_at'>):Promise<TrainingProgram>{const {rows}=await pool.query<TrainingProgram>(`INSERT INTO public.coach_training_programs(client_id,name,goal,duration_weeks,comment) VALUES($1,$2,$3,$4,$5) ON CONFLICT(client_id) DO UPDATE SET name=EXCLUDED.name,goal=EXCLUDED.goal,duration_weeks=EXCLUDED.duration_weeks,comment=EXCLUDED.comment,updated_at=NOW() RETURNING *`,[p.client_id,p.name,p.goal,p.duration_weeks,p.comment]);return rows[0];}
 export async function listTrainingProgramDays(clientId:number):Promise<TrainingProgramDay[]>{const {rows}=await pool.query<TrainingProgramDay>('SELECT * FROM public.coach_training_program_days WHERE client_id=$1 ORDER BY day_number',[clientId]);return rows;}
