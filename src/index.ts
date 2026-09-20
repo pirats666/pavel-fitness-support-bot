@@ -3,8 +3,7 @@ import { createServer } from 'node:http';
 import { Bot, InlineKeyboard, type Context } from 'grammy';
 import { closeDb, createClient, deleteClient, getClient, listClients, updateClientField, logDatabaseDiagnostics, migrateStage1Schema, migrateStage2AssessmentSchema, migrateStage3StrategySchema, getPrimaryAssessment, upsertPrimaryAssessment, getTrainingStrategy, upsertTrainingStrategy, migrateStage4ProgramSchema, migrateStage4TemplateSchema, getTrainingProgram, deleteTrainingProgram, listTrainingProgramTemplates, getTrainingProgramTemplate, listTrainingProgramTemplateDays, listTrainingProgramTemplateExercises, applyTrainingProgramTemplate, updateTrainingProgramExercise, updateTrainingProgramName, listProgramCatalogMuscles, listProgramCatalogExercises, replaceTrainingProgramExercise, upsertTrainingProgram, listTrainingProgramDays, getTrainingProgramDay, createTrainingProgramDay, listTrainingProgramExercises, createTrainingProgramExercise, getTrainingProgramExercise, deleteTrainingProgramExercise } from './db.js';
 import type { Client, ClientDraft, AddSession, PrimaryAssessment, TrainingStrategy, TrainingProgram, TrainingProgramDay, TrainingProgramExercise } from './types.js';
-import { migrateNextBaseTemplateSchema } from './stage4-next-template.js';
-import { migrateFollowingBaseTemplateSchema } from './stage4-next-template.js';
+import { migrateNextBaseTemplateSchema, migrateFollowingBaseTemplateSchema } from './stage4-next-template.js';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID;
@@ -248,7 +247,12 @@ async function showStrategy(ctx:Context,id:number){
 }
 
 function normalizeProgramText(value:string){
-  return value.split('\\\\n').join('\\n').split('/n').join('\\n').trim();
+  return String(value ?? '')
+    .replace(/\\r\\n/g,'\\n')
+    .replace(/\\\\n/g,'\\n')
+    .replace(/\\/n/g,'\\n')
+    .replace(/\\n{3,}/g,'\\n\\n')
+    .trim();
 }
 function formatProgramComment(comment:string){
   const normalized=normalizeProgramText(comment);
