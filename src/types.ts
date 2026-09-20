@@ -35,6 +35,17 @@ export type AssessmentRating = 'Низкие' | 'Средние' | 'Хороши
 export type MobilityRating = 'Ограниченная' | 'Средняя' | 'Хорошая';
 export type CoordinationRating = 'Требует развития' | 'Средняя' | 'Хорошая';
 export type MovementRating = 'Хорошо' | 'Удовлетворительно' | 'Требует внимания';
+export type TrainingStrategy = {
+  client_id: number;
+  main_task: string | null;
+  priorities: string | null;
+  what_to_account_for: string | null;
+  main_focus: string | null;
+  trainer_decision: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type PrimaryAssessment = {
   client_id: number;
   fitness_level: AssessmentLevel | null;
