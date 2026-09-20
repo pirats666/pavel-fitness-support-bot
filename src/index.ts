@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
 import { Bot, InlineKeyboard, type Context } from 'grammy';
-import { closeDb, createClient, deleteClient, getClient, listClients, updateClientField, logDatabaseDiagnostics, migrateStage1Schema, migrateStage2AssessmentSchema, migrateStage3StrategySchema, getPrimaryAssessment, upsertPrimaryAssessment, getTrainingStrategy, upsertTrainingStrategy, migrateStage4ProgramSchema, migrateStage4TemplateSchema, getTrainingProgram, listTrainingProgramTemplates, getTrainingProgramTemplate, listTrainingProgramTemplateDays, listTrainingProgramTemplateExercises, applyTrainingProgramTemplate, updateTrainingProgramExercise, updateTrainingProgramName, listProgramCatalogMuscles, listProgramCatalogExercises, replaceTrainingProgramExercise, upsertTrainingProgram, listTrainingProgramDays, getTrainingProgramDay, createTrainingProgramDay, listTrainingProgramExercises, createTrainingProgramExercise, getTrainingProgramExercise, deleteTrainingProgramExercise } from './db.js';
+import { closeDb, createClient, deleteClient, getClient, listClients, updateClientField, logDatabaseDiagnostics, migrateStage1Schema, migrateStage2AssessmentSchema, migrateStage3StrategySchema, getPrimaryAssessment, upsertPrimaryAssessment, getTrainingStrategy, upsertTrainingStrategy, migrateStage4ProgramSchema, migrateStage4TemplateSchema, getTrainingProgram, deleteTrainingProgram, listTrainingProgramTemplates, getTrainingProgramTemplate, listTrainingProgramTemplateDays, listTrainingProgramTemplateExercises, applyTrainingProgramTemplate, updateTrainingProgramExercise, updateTrainingProgramName, listProgramCatalogMuscles, listProgramCatalogExercises, replaceTrainingProgramExercise, upsertTrainingProgram, listTrainingProgramDays, getTrainingProgramDay, createTrainingProgramDay, listTrainingProgramExercises, createTrainingProgramExercise, getTrainingProgramExercise, deleteTrainingProgramExercise } from './db.js';
 import type { Client, ClientDraft, AddSession, PrimaryAssessment, TrainingStrategy, TrainingProgram, TrainingProgramDay, TrainingProgramExercise } from './types.js';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -276,15 +276,40 @@ function programText(p:TrainingProgram|Omit<TrainingProgram,'created_at'|'update
   return lines.join('\n');
 }
 function dayTitle(d:TrainingProgramDay){const clean=d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'').trim();return `🏋️ <b>ДЕНЬ ${d.day_number} — ${esc(clean||d.name)}</b>`;}
+function templateProgramText(t:any,days:any[],exercisesByDay:Record<number,any[]>){
+  const lines=['📚 <b>'+esc(t.name)+'</b>'];
+  if(t.goal)lines.push('','🎯 <b>ЦЕЛЬ</b>',esc(normalizeProgramText(t.goal)));
+  if(t.comment){
+    const formatted=formatProgramComment(t.comment);
+    if(formatted)lines.push('',formatted);
+  }
+  if(days.length){
+    lines.push('','📅 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>');
+    for(const d of days){
+      const clean=d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'').trim();
+      lines.push('','🏋️ <b>ДЕНЬ '+d.day_number+' — '+esc(clean||d.name)+'</b>');
+      if(d.comment)lines.push('   '+esc(normalizeProgramText(d.comment)));
+      const ex=exercisesByDay[d.id]||[];
+      if(!ex.length){lines.push('   Упражнения не добавлены');continue;}
+      ex.forEach((e:any,i:number)=>{
+        const details=[e.sets+' × '+e.reps];
+        if(e.rest_seconds!==null)details.push('отдых '+e.rest_seconds+' сек.');
+        if(e.rir!==null)details.push('RIR '+e.rir);
+        lines.push((i+1)+'. <b>'+esc(e.name)+'</b>'+(e.muscle_group?' — '+esc(e.muscle_group):''),'   '+details.join(' · '));
+      });
+    }
+  }
+  return lines.join('\n');
+}
 async function showProgram(ctx:Context,id:number){
   const c=await getClient(id);if(!c)return render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));
   const p=await getTrainingProgram(id);const days=p?await listTrainingProgramDays(id):[];
   if(!p)return render(ctx,'🏋️ <b>ТРЕНИРОВОЧНАЯ ПРОГРАММА</b>\n\nПрограмма ещё не создана.',new InlineKeyboard().text('📚 Выбрать из базы','program:templates:'+id).row().text('➕ Создать программу','program:new:'+id).row().text('⬅️ Назад к клиенту','client:view:'+id));
-  await render(ctx,programText(p,days),new InlineKeyboard().text('📚 База программ','program:templates:'+id).row().text('➕ Добавить день','program:day:new:'+id).row().text('📋 Тренировочные дни','program:days:'+id).row().text('✏️ Скорректировать программу','program:edit:'+id).row().text('⬅️ Назад к клиенту','client:view:'+id));
+  await render(ctx,programText(p,days),new InlineKeyboard().text('📚 База программ','program:templates:'+id).row().text('➕ Добавить день','program:day:new:'+id).row().text('📋 Тренировочные дни','program:days:'+id).row().text('✏️ Скорректировать программу','program:edit:'+id).row().text('🗑 Удалить программу','program:delete:'+id).row().text('⬅️ Назад к клиенту','client:view:'+id));
 }
 bot.callbackQuery(/^program:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();await showProgram(ctx,id);});
 bot.callbackQuery(/^program:templates:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();const ts=await listTrainingProgramTemplates();const kb=new InlineKeyboard();for(const t of ts)kb.text('📋 '+t.name,'program:template:'+t.id+':'+id).row();kb.text('⬅️ К программе','program:'+id);await render(ctx,'📚 <b>БАЗА ТРЕНИРОВОЧНЫХ ПРОГРАММ</b>\n\nВыберите базовую программу:',kb);});
-bot.callbackQuery(/^program:template:(\d+):(\d+)$/,async ctx=>{const tid=Number(ctx.match[1]),id=Number(ctx.match[2]);await ctx.answerCallbackQuery();const t=await getTrainingProgramTemplate(tid);if(!t)return;const days=await listTrainingProgramTemplateDays(tid);const kb=new InlineKeyboard().text('📥 Загрузить клиенту','program:template-apply:'+tid+':'+id).row().text('⬅️ К базе программ','program:templates:'+id);await render(ctx,`📚 <b>${esc(t.name)}</b>\n\n🎯 <b>ЦЕЛЬ</b>\n${esc((t.goal||'Без цели').replace(/\\\\n/g,'\\n'))}\n\n${formatProgramComment(t.comment||'')}`,kb);});
+bot.callbackQuery(/^program:template:(\d+):(\d+)$/,async ctx=>{const tid=Number(ctx.match[1]),id=Number(ctx.match[2]);await ctx.answerCallbackQuery();const t=await getTrainingProgramTemplate(tid);if(!t)return;const days=await listTrainingProgramTemplateDays(tid);const exercisesByDay:Record<number,any[]>={};for(const d of days)exercisesByDay[d.id]=await listTrainingProgramTemplateExercises(d.id);const kb=new InlineKeyboard().text('📥 Загрузить клиенту','program:template-apply:'+tid+':'+id).row().text('⬅️ К базе программ','program:templates:'+id);await render(ctx,templateProgramText(t,days,exercisesByDay),kb);});
 bot.callbackQuery(/^program:template-apply:(\d+):(\d+)$/,async ctx=>{const tid=Number(ctx.match[1]),id=Number(ctx.match[2]);await ctx.answerCallbackQuery();const saved=await applyTrainingProgramTemplate(id,tid);await render(ctx,'✅ Базовая программа загружена в карточку клиента.\n\n'+programText(saved,await listTrainingProgramDays(id)),new InlineKeyboard().text('✏️ Скорректировать программу','program:edit:'+id).row().text('⬅️ К клиенту','client:view:'+id));});
 bot.callbackQuery(/^program:(?:new|edit):(\d+)$/,async ctx=>{
   const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();
@@ -361,6 +386,8 @@ bot.callbackQuery(/^program:edit-save:(\d+)$/,async ctx=>{
   const p=await updateTrainingProgramName(id,s.program.name);programSessions.delete(ctx.from!.id);
   await render(ctx,'✅ <b>Программа сохранена в базе.</b>\n\n'+(p?programText(p,await listTrainingProgramDays(id)):'Программа сохранена.'),new InlineKeyboard().text('✏️ Скорректировать программу','program:edit:'+id).row().text('⬅️ К клиенту','client:view:'+id));
 });
+bot.callbackQuery(/^program:delete:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();const p=await getTrainingProgram(id);if(!p)return showProgram(ctx,id);await render(ctx,'⚠️ <b>Удалить тренировочную программу?</b>\\n\\n<b>'+esc(p.name)+'</b>\\n\\nБудут удалены программа, тренировочные дни и упражнения клиента. Это действие нельзя отменить.',new InlineKeyboard().text('🗑 Да, удалить','program:delete-confirm:'+id).row().text('⬅️ Отмена','program:'+id));});
+bot.callbackQuery(/^program:delete-confirm:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();const ok=await deleteTrainingProgram(id);if(!ok)return render(ctx,'❌ Программа не найдена или уже удалена.',new InlineKeyboard().text('⬅️ К клиенту','client:view:'+id));await render(ctx,'✅ <b>Тренировочная программа удалена.</b>',new InlineKeyboard().text('🏋️ Создать/загрузить новую','program:'+id).row().text('⬅️ К клиенту','client:view:'+id));});
 bot.callbackQuery(/^program:cancel:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();programSessions.delete(ctx.from!.id);await showProgram(ctx,id);});
 bot.callbackQuery(/^program:skipgoal:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);const s=programSessions.get(ctx.from!.id);if(!s||s.kind!=='program'||!s.program)return;await ctx.answerCallbackQuery();s.program.goal=null;s.step='duration';await render(ctx,'Введите срок программы в неделях:',new InlineKeyboard().text('⏭ Пропустить','program:skipduration:'+s.clientId).row().text('❌ Отмена','program:cancel:'+s.clientId));});
 bot.callbackQuery(/^program:day:new:(\d+)$/,async ctx=>{
