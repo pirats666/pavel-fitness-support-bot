@@ -67,3 +67,7 @@ export type PrimaryAssessment = {
   created_at: string;
   updated_at: string;
 };
+
+export type TrainingProgram = { client_id:number; name:string; goal:string|null; duration_weeks:number|null; comment:string|null; created_at:string; updated_at:string; };
+export type TrainingProgramDay = { id:number; client_id:number; day_number:number; name:string; comment:string|null; created_at:string; };
+export type TrainingProgramExercise = { id:number; day_id:number; exercise_order:number; name:string; muscle_group:string|null; sets:number; reps:string; rest_seconds:number|null; rir:number|null; comment:string|null; created_at:string; };

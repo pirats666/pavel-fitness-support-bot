@@ -1,5 +1,5 @@
 import pg from 'pg';
-import type { Client, ClientDraft, PrimaryAssessment, TrainingStrategy } from './types.js';
+import type { Client, ClientDraft, PrimaryAssessment, TrainingStrategy, TrainingProgram, TrainingProgramDay, TrainingProgramExercise } from './types.js';
 
 const { Pool } = pg;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -124,6 +124,34 @@ export async function upsertTrainingStrategy(
   ]);
   return rows[0];
 }
+
+export async function migrateStage4ProgramSchema(): Promise<void> {
+  await pool.query(`CREATE TABLE IF NOT EXISTS public.training_programs (
+    client_id BIGINT PRIMARY KEY REFERENCES public.clients(id) ON DELETE CASCADE,
+    name TEXT NOT NULL, goal TEXT, duration_weeks INTEGER, comment TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS public.training_program_days (
+    id BIGSERIAL PRIMARY KEY, client_id BIGINT NOT NULL REFERENCES public.training_programs(client_id) ON DELETE CASCADE,
+    day_number INTEGER NOT NULL, name TEXT NOT NULL, comment TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(client_id,day_number)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS public.training_program_exercises (
+    id BIGSERIAL PRIMARY KEY, day_id BIGINT NOT NULL REFERENCES public.training_program_days(id) ON DELETE CASCADE,
+    exercise_order INTEGER NOT NULL, name TEXT NOT NULL, muscle_group TEXT, sets INTEGER NOT NULL, reps TEXT NOT NULL,
+    rest_seconds INTEGER, rir NUMERIC, comment TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(day_id,exercise_order)
+  )`);
+}
+export async function getTrainingProgram(clientId:number):Promise<TrainingProgram|null>{const {rows}=await pool.query<TrainingProgram>('SELECT * FROM public.training_programs WHERE client_id=$1',[clientId]);return rows[0]??null;}
+export async function upsertTrainingProgram(p:Omit<TrainingProgram,'created_at'|'updated_at'>):Promise<TrainingProgram>{const {rows}=await pool.query<TrainingProgram>(`INSERT INTO public.training_programs(client_id,name,goal,duration_weeks,comment) VALUES($1,$2,$3,$4,$5) ON CONFLICT(client_id) DO UPDATE SET name=EXCLUDED.name,goal=EXCLUDED.goal,duration_weeks=EXCLUDED.duration_weeks,comment=EXCLUDED.comment,updated_at=NOW() RETURNING *`,[p.client_id,p.name,p.goal,p.duration_weeks,p.comment]);return rows[0];}
+export async function listTrainingProgramDays(clientId:number):Promise<TrainingProgramDay[]>{const {rows}=await pool.query<TrainingProgramDay>('SELECT * FROM public.training_program_days WHERE client_id=$1 ORDER BY day_number',[clientId]);return rows;}
+export async function getTrainingProgramDay(id:number):Promise<TrainingProgramDay|null>{const {rows}=await pool.query<TrainingProgramDay>('SELECT * FROM public.training_program_days WHERE id=$1',[id]);return rows[0]??null;}
+export async function createTrainingProgramDay(clientId:number,name:string):Promise<TrainingProgramDay>{const {rows}=await pool.query<TrainingProgramDay>('INSERT INTO public.training_program_days(client_id,day_number,name) VALUES($1,COALESCE((SELECT MAX(day_number)+1 FROM public.training_program_days WHERE client_id=$1),1),$2) RETURNING *',[clientId,name]);return rows[0];}
+export async function listTrainingProgramExercises(dayId:number):Promise<TrainingProgramExercise[]>{const {rows}=await pool.query<TrainingProgramExercise>('SELECT * FROM public.training_program_exercises WHERE day_id=$1 ORDER BY exercise_order',[dayId]);return rows;}
+export async function createTrainingProgramExercise(e:Omit<TrainingProgramExercise,'id'|'created_at'|'exercise_order'>):Promise<TrainingProgramExercise>{const {rows}=await pool.query<TrainingProgramExercise>(`INSERT INTO public.training_program_exercises(day_id,exercise_order,name,muscle_group,sets,reps,rest_seconds,rir,comment) VALUES($1,COALESCE((SELECT MAX(exercise_order)+1 FROM public.training_program_exercises WHERE day_id=$1),1),$2,$3,$4,$5,$6,$7,$8) RETURNING *`,[e.day_id,e.name,e.muscle_group,e.sets,e.reps,e.rest_seconds,e.rir,e.comment]);return rows[0];}
+export async function getTrainingProgramExercise(id:number):Promise<(TrainingProgramExercise&{client_id:number})|null>{const {rows}=await pool.query<TrainingProgramExercise&{client_id:number}>('SELECT e.*,d.client_id FROM public.training_program_exercises e JOIN public.training_program_days d ON d.id=e.day_id WHERE e.id=$1',[id]);return rows[0]??null;}
+export async function deleteTrainingProgramExercise(id:number):Promise<boolean>{const r=await pool.query('DELETE FROM public.training_program_exercises WHERE id=$1',[id]);return r.rowCount===1;}
 export async function listClients(): Promise<Client[]> {
   const { rows } = await pool.query<Client>('SELECT * FROM public.clients ORDER BY created_at DESC, id DESC');
   return rows;
