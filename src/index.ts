@@ -21,7 +21,7 @@ type AssessmentDraft = Omit<PrimaryAssessment,'created_at'|'updated_at'>;
 const assessmentSessions = new Map<number,{clientId:number;draft:AssessmentDraft;awaitingText?:keyof AssessmentDraft}>();
 type StrategyDraft = Omit<TrainingStrategy,'created_at'|'updated_at'>;
 const strategySessions = new Map<number,{clientId:number;draft:StrategyDraft;awaitingText?:keyof StrategyDraft}>();
-type ProgramSession={clientId:number;kind:'program'|'day'|'exercise'|'exercise-edit';step:string;program?:Omit<TrainingProgram,'created_at'|'updated_at'>;dayId?:number;exerciseId?:number;exercise?:Partial<Omit<TrainingProgramExercise,'id'|'created_at'|'exercise_order'>>};
+type ProgramSession={clientId:number;kind:'program'|'day'|'exercise'|'exercise-edit';step:string;program?:Omit<TrainingProgram,'created_at'|'updated_at'>;dayId?:number;exerciseId?:number;exerciseId?:number;exercise?:Partial<TrainingProgramExercise>};
 const programSessions=new Map<number,ProgramSession>();
 
 const GOALS = [
