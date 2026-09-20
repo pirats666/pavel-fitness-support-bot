@@ -245,15 +245,31 @@ async function showStrategy(ctx:Context,id:number){
   return render(ctx,strategyText(s),new InlineKeyboard().text('✏️ Изменить','strategy:edit:'+id).row().text('⬅️ Назад к клиенту','client:view:'+id));
 }
 
+function formatProgramComment(comment:string){
+  const normalized=comment.replace(/\\\\n/g,'\\n').trim();
+  return normalized.split('\\n').map(line=>{
+    const t=line.trim();
+    if(!t)return '';
+    if(/^График:$/i.test(t))return '📅 <b>ГРАФИК</b>';
+    if(/^Интенсивность:$/i.test(t))return '🔥 <b>ИНТЕНСИВНОСТЬ</b>';
+    if(/^Прогрессия:$/i.test(t))return '📈 <b>ПРОГРЕССИЯ</b>';
+    if(/^Основной принцип:$/i.test(t))return '🎯 <b>ОСНОВНОЙ ПРИНЦИП</b>';
+    return esc(line);
+  }).join('\\n');
+}
+
 function programText(p:TrainingProgram|Omit<TrainingProgram,'created_at'|'updated_at'>,days:TrainingProgramDay[]){
   const lines=['🏋️ <b>'+esc(p.name)+'</b>'];
-  if(p.goal) lines.push('', '🎯 <b>Цель</b>\\n'+esc(p.goal));
+  if(p.goal)lines.push('','🎯 <b>ЦЕЛЬ</b>',''+esc(p.goal.replace(/\\\\n/g,'\\n')));
   if(days.length){
-    lines.push('', '📅 <b>График</b>');
-    for(const d of days) lines.push('День '+d.day_number+' — '+esc(d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'')));
-  } else lines.push('', '📅 Дней: 0');
-  if(p.duration_weeks) lines.push('', '⏱ <b>Срок</b> — '+p.duration_weeks+' нед.');
-  if(p.comment) lines.push('', '📝 <b>Правила и комментарий</b>\\n'+esc(p.comment));
+    lines.push('','📅 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>');
+    for(const d of days)lines.push('','День '+d.day_number+' — '+esc(d.name.replace(/^День\\s*\\d+\\s*[—-]?\\s*/i,'').trim()));
+  }else lines.push('','📅 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>','Не добавлены');
+  if(p.duration_weeks)lines.push('','⏱ <b>СРОК</b> — '+p.duration_weeks+' нед.');
+  if(p.comment){
+    const formatted=formatProgramComment(p.comment);
+    if(formatted)lines.push('','📝 <b>ПРАВИЛА И КОММЕНТАРИЙ</b>','',formatted);
+  }
   return lines.join('\\n');
 }
 function dayTitle(d:TrainingProgramDay){const clean=d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'').trim();return `🏋️ <b>ДЕНЬ ${d.day_number} — ${esc(clean||d.name)}</b>`;}
