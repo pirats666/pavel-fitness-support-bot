@@ -172,6 +172,72 @@ export async function seedBaseFullBodyProgram(clientId:number):Promise<void>{
     await c.query('COMMIT');
   }catch(e){await c.query('ROLLBACK');throw e}finally{c.release()}
 }
+export async function migrateStage4TemplateSchema(): Promise<void>{
+  await pool.query(`CREATE TABLE IF NOT EXISTS public.coach_training_program_templates (
+    id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, goal TEXT, duration_weeks INTEGER, comment TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS public.coach_training_program_template_days (
+    id BIGSERIAL PRIMARY KEY, template_id BIGINT NOT NULL REFERENCES public.coach_training_program_templates(id) ON DELETE CASCADE,
+    day_number INTEGER NOT NULL, name TEXT NOT NULL, comment TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(template_id,day_number)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS public.coach_training_program_template_exercises (
+    id BIGSERIAL PRIMARY KEY, day_id BIGINT NOT NULL REFERENCES public.coach_training_program_template_days(id) ON DELETE CASCADE,
+    exercise_order INTEGER NOT NULL, name TEXT NOT NULL, muscle_group TEXT, sets INTEGER NOT NULL, reps TEXT NOT NULL,
+    rest_seconds INTEGER, rir NUMERIC, comment TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(day_id,exercise_order)
+  )`);
+  const {rows}=await pool.query(`INSERT INTO public.coach_training_program_templates(name,goal,duration_weeks,comment)
+    VALUES($1,$2,NULL,$3) ON CONFLICT(name) DO UPDATE SET goal=EXCLUDED.goal,comment=EXCLUDED.comment,updated_at=NOW() RETURNING id`,
+    ['Full Body — 3 дня в неделю','Базовая сила, гипертрофия, силовая выносливость и полный двигательный баланс','График: Пн — Ср — Пт или Вт — Чт — Сб. Между тренировками — минимум 1 день восстановления.']);
+  const templateId=rows[0].id;
+  const existing=await pool.query('SELECT COUNT(*)::int AS count FROM public.coach_training_program_template_days WHERE template_id=$1',[templateId]);
+  if(existing.rows[0].count===0){
+    const days=[
+      ['День 1 — базовая сила','Базовые многосуставные движения.'],
+      ['День 2 — гипертрофия и односторонняя работа','Гипертрофия, односторонняя работа и контроль движения.'],
+      ['День 3 — силовая выносливость и полный двигательный баланс','Полный двигательный баланс и силовая выносливость.']
+    ];
+    const ex=[
+      [['Присед со штангой / гоблет-присед','Квадрицепс, ягодичные',3,'6–8',150],['Жим лёжа','Грудь, трицепс',3,'6–8',150],['Тяга горизонтального блока','Спина, задняя дельта, бицепс',3,'8–10',105],['Румынская тяга','Задняя поверхность бедра, ягодичные',3,'8–10',120],['Жим гантелей вверх','Плечи, трицепс',2,'8–10',90],['Сгибание рук с гантелями','Бицепс',2,'10–12',75],['Планка','Мышцы кора',2,'30–45 сек',60]],
+      [['Жим ногами','Квадрицепс, ягодичные',3,'8–12',120],['Жим гантелей на наклонной скамье','Верх груди, трицепс, передняя дельта',3,'8–12',105],['Тяга верхнего блока','Широчайшие, бицепс',3,'8–12',105],['Болгарский сплит-присед','Квадрицепс, ягодичные',2,'8–10 на ногу',90],['Разведения гантелей в стороны','Средняя дельта',2,'12–15',75],['Сгибание ног в тренажёре','Задняя поверхность бедра',2,'10–15',75],['Dead Bug','Мышцы кора',2,'8–12 на сторону',60]],
+      [['Трап-бар / классическая тяга','Ягодичные, задняя поверхность бедра, спина',3,'5–6',150],['Жим в тренажёре / отжимания','Грудь, трицепс, передняя дельта',3,'8–12',105],['Тяга гантели одной рукой','Широчайшие, ромбовидные, бицепс',3,'8–12',90],['Выпады / шаги на платформу','Квадрицепс, ягодичные',2,'10–12 на ногу',90],['Ягодичный мост','Ягодичные',2,'10–12',90],['Face Pull','Задняя дельта, верх спины',2,'12–15',75],['Pallof Press','Мышцы кора',2,'10–12 на сторону',60]]
+    ];
+    for(let i=0;i<days.length;i++){
+      const d=await pool.query('INSERT INTO public.coach_training_program_template_days(template_id,day_number,name,comment) VALUES($1,$2,$3,$4) RETURNING id',[templateId,i+1,days[i][0],days[i][1]]);
+      for(let j=0;j<ex[i].length;j++){
+        const e=ex[i][j];
+        await pool.query('INSERT INTO public.coach_training_program_template_exercises(day_id,exercise_order,name,muscle_group,sets,reps,rest_seconds,rir,comment) VALUES($1,$2,$3,$4,$5,$6,$7,NULL,NULL)',[d.rows[0].id,j+1,...e]);
+      }
+    }
+  }
+}
+export async function listTrainingProgramTemplates():Promise<TrainingProgramTemplate[]>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates ORDER BY name');return rows;}
+export async function getTrainingProgramTemplate(id:number):Promise<TrainingProgramTemplate|null>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates WHERE id=$1',[id]);return rows[0]??null;}
+export async function listTrainingProgramTemplateDays(templateId:number):Promise<TrainingProgramTemplateDay[]>{const {rows}=await pool.query<TrainingProgramTemplateDay[]>('SELECT * FROM public.coach_training_program_template_days WHERE template_id=$1 ORDER BY day_number',[templateId]);return rows as any;}
+export async function listTrainingProgramTemplateExercises(dayId:number):Promise<TrainingProgramTemplateExercise[]>{const {rows}=await pool.query<TrainingProgramTemplateExercise[]>('SELECT * FROM public.coach_training_program_template_exercises WHERE day_id=$1 ORDER BY exercise_order');return rows as any;}
+export async function applyTrainingProgramTemplate(clientId:number,templateId:number):Promise<TrainingProgram>{
+  const c=await pool.connect();
+  try{
+    await c.query('BEGIN');
+    const t=await c.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates WHERE id=$1',[templateId]);
+    if(!t.rows[0])throw new Error('Template not found');
+    const x=t.rows[0];
+    const p=await c.query<TrainingProgram>(`INSERT INTO public.coach_training_programs(client_id,name,goal,duration_weeks,comment) VALUES($1,$2,$3,$4,$5)
+      ON CONFLICT(client_id) DO UPDATE SET name=EXCLUDED.name,goal=EXCLUDED.goal,duration_weeks=EXCLUDED.duration_weeks,comment=EXCLUDED.comment,updated_at=NOW() RETURNING *`,
+      [clientId,x.name,x.goal,x.duration_weeks,x.comment]);
+    await c.query('DELETE FROM public.coach_training_program_days WHERE client_id=$1',[clientId]);
+    const days=await c.query('SELECT * FROM public.coach_training_program_template_days WHERE template_id=$1 ORDER BY day_number',[templateId]);
+    for(const d of days.rows){
+      const nd=await c.query('INSERT INTO public.coach_training_program_days(client_id,day_number,name,comment) VALUES($1,$2,$3,$4) RETURNING id',[clientId,d.day_number,d.name,d.comment]);
+      const ex=await c.query('SELECT * FROM public.coach_training_program_template_exercises WHERE day_id=$1 ORDER BY exercise_order',[d.id]);
+      for(const e of ex.rows)await c.query('INSERT INTO public.coach_training_program_exercises(day_id,exercise_order,name,muscle_group,sets,reps,rest_seconds,rir,comment) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[nd.rows[0].id,e.exercise_order,e.name,e.muscle_group,e.sets,e.reps,e.rest_seconds,e.rir,e.comment]);
+    }
+    await c.query('COMMIT');return p.rows[0];
+  }catch(e){await c.query('ROLLBACK');throw e}finally{c.release()}
+}
+export async function updateTrainingProgramExercise(e:{id:number;name:string;muscle_group:string|null;sets:number;reps:string;rest_seconds:number|null;rir:number|null;comment:string|null}):Promise<TrainingProgramExercise|null>{const {rows}=await pool.query<TrainingProgramExercise>(`UPDATE public.coach_training_program_exercises SET name=$2,muscle_group=$3,sets=$4,reps=$5,rest_seconds=$6,rir=$7,comment=$8 WHERE id=$1 RETURNING *`,[e.id,e.name,e.muscle_group,e.sets,e.reps,e.rest_seconds,e.rir,e.comment]);return rows[0]??null;}
 export async function getTrainingProgram(clientId:number):Promise<TrainingProgram|null>{const {rows}=await pool.query<TrainingProgram>('SELECT * FROM public.coach_training_programs WHERE client_id=$1',[clientId]);return rows[0]??null;}
 export async function upsertTrainingProgram(p:Omit<TrainingProgram,'created_at'|'updated_at'>):Promise<TrainingProgram>{const {rows}=await pool.query<TrainingProgram>(`INSERT INTO public.coach_training_programs(client_id,name,goal,duration_weeks,comment) VALUES($1,$2,$3,$4,$5) ON CONFLICT(client_id) DO UPDATE SET name=EXCLUDED.name,goal=EXCLUDED.goal,duration_weeks=EXCLUDED.duration_weeks,comment=EXCLUDED.comment,updated_at=NOW() RETURNING *`,[p.client_id,p.name,p.goal,p.duration_weeks,p.comment]);return rows[0];}
 export async function listTrainingProgramDays(clientId:number):Promise<TrainingProgramDay[]>{const {rows}=await pool.query<TrainingProgramDay>('SELECT * FROM public.coach_training_program_days WHERE client_id=$1 ORDER BY day_number',[clientId]);return rows;}
