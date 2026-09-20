@@ -204,6 +204,47 @@ bot.callbackQuery(/^assessment:movement-set:(\d+):([a-z_]+):([GSAN])$/,async ctx
 bot.callbackQuery(/^assessment:text:(\d+):(weaknesses|strengths|attention|trainer_comment)$/,async ctx=>{const id=Number(ctx.match[1]);const field=ctx.match[2] as keyof AssessmentDraft;await ctx.answerCallbackQuery();const s=await loadAssessmentSession(ctx,id);s.awaitingText=field;const labels:any={weaknesses:'⚠️ Слабые стороны',strengths:'💪 Сильные стороны',attention:'⚠️ Требует внимания',trainer_comment:'📝 Комментарий тренера'};await render(ctx,labels[field]+'\\n\\nВведите текст или нажмите «Пропустить».',new InlineKeyboard().text('⏭ Пропустить','assessment:skip:'+id+':'+field).row().text('⬅️ Назад к оценке','assessment:menu:'+id));});
 bot.callbackQuery(/^assessment:skip:(\d+):(weaknesses|strengths|attention|trainer_comment)$/,async ctx=>{const id=Number(ctx.match[1]);const field=ctx.match[2] as keyof AssessmentDraft;await ctx.answerCallbackQuery();const s=await loadAssessmentSession(ctx,id);(s.draft as any)[field]=null;s.awaitingText=undefined;await render(ctx,assessmentText(s.draft),assessmentMenu(id));});
 bot.callbackQuery(/^assessment:save:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();const s=await loadAssessmentSession(ctx,id);try{const saved=await upsertPrimaryAssessment(s.draft);assessmentSessions.delete(ctx.from!.id);await render(ctx,assessmentText(saved),new InlineKeyboard().text('✏️ Изменить оценку','assessment:edit:'+id).row().text('⬅️ Назад к клиенту','client:view:'+id));}catch(e){console.error('[ASSESSMENT SAVE FAILED]',e);await render(ctx,'❌ Не удалось сохранить первичную оценку.',assessmentMenu(id));}});
+
+type StrategyField = 'main_task'|'priorities'|'what_to_account_for'|'main_focus'|'trainer_decision';
+const STRATEGY_FIELDS:readonly (readonly [string,StrategyField])[]=[
+  ['🎯 Основная задача','main_task'],['⭐ Приоритеты','priorities'],
+  ['⚠️ Что учитывать','what_to_account_for'],['🔎 Основной фокус','main_focus'],
+  ['📝 Решение / комментарий тренера','trainer_decision']
+];
+function blankStrategy(clientId:number):StrategyDraft{return {client_id:clientId,main_task:null,priorities:null,what_to_account_for:null,main_focus:null,trainer_decision:null};}
+function strategyText(s:StrategyDraft|TrainingStrategy){
+  const value=(v:string|null)=>v===null?'Не заполнено':esc(v);
+  return ['🎯 <b>СТРАТЕГИЯ ТРЕНИРОВОК</b>','',
+    '🎯 <b>Основная задача:</b> '+value(s.main_task),
+    '⭐ <b>Приоритеты:</b> '+value(s.priorities),
+    '⚠️ <b>Что учитывать:</b> '+value(s.what_to_account_for),
+    '🔎 <b>Основной фокус:</b> '+value(s.main_focus),
+    '📝 <b>Решение тренера:</b> '+value(s.trainer_decision)].join('\\n');
+}
+function strategyMenu(id:number){
+  const kb=new InlineKeyboard();
+  for(const [label,field] of STRATEGY_FIELDS) kb.text(label,'strategy:field:'+id+':'+field).row();
+  return kb.text('💾 Сохранить','strategy:save:'+id).row().text('✏️ Изменить','strategy:edit:'+id).row().text('⬅️ Назад к клиенту','client:view:'+id);
+}
+async function loadStrategySession(ctx:Context,id:number){
+  const c=await getClient(id); if(!c)throw new Error('Client not found');
+  let s=strategySessions.get(ctx.from!.id);
+  if(!s||s.clientId!==id){const existing=await getTrainingStrategy(id);s={clientId:id,draft:existing?{...existing}:blankStrategy(id)};strategySessions.set(ctx.from!.id,s);}
+  return s;
+}
+async function showStrategy(ctx:Context,id:number){
+  const c=await getClient(id);
+  if(!c)return render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));
+  const s=await getTrainingStrategy(id);
+  if(!s)return render(ctx,'🎯 <b>СТРАТЕГИЯ ТРЕНИРОВОК</b>\\n\\nСтратегия ещё не заполнена.',new InlineKeyboard().text('➕ Создать стратегию','strategy:new:'+id).row().text('⬅️ Назад к клиенту','client:view:'+id));
+  return render(ctx,strategyText(s),new InlineKeyboard().text('✏️ Изменить','strategy:edit:'+id).row().text('⬅️ Назад к клиенту','client:view:'+id));
+}
+bot.callbackQuery(/^strategy:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();await showStrategy(ctx,id);});
+bot.callbackQuery(/^strategy:(?:new|edit):(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();try{await loadStrategySession(ctx,id);await render(ctx,'🎯 <b>Стратегия тренировок</b>\\n\\nВыберите раздел для заполнения или изменения.',strategyMenu(id));}catch(e){console.error('[STRATEGY OPEN FAILED]',e);await render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));}});
+bot.callbackQuery(/^strategy:field:(\d+):(main_task|priorities|what_to_account_for|main_focus|trainer_decision)$/,async ctx=>{const id=Number(ctx.match[1]);const field=ctx.match[2] as StrategyField;await ctx.answerCallbackQuery();const s=await loadStrategySession(ctx,id);s.awaitingText=field;const labels:Record<StrategyField,string>={main_task:'🎯 Основная задача',priorities:'⭐ Приоритеты',what_to_account_for:'⚠️ Что учитывать',main_focus:'🔎 Основной фокус',trainer_decision:'📝 Решение / комментарий тренера'};await render(ctx,labels[field]+'\\n\\nВведите текст или нажмите «Пропустить».',new InlineKeyboard().text('⏭ Пропустить','strategy:skip:'+id+':'+field).row().text('⬅️ Назад к стратегии','strategy:menu:'+id));});
+bot.callbackQuery(/^strategy:skip:(\d+):(main_task|priorities|what_to_account_for|main_focus|trainer_decision)$/,async ctx=>{const id=Number(ctx.match[1]);const field=ctx.match[2] as StrategyField;await ctx.answerCallbackQuery();const s=await loadStrategySession(ctx,id);s.draft[field]=null;s.awaitingText=undefined;await render(ctx,strategyText(s.draft),strategyMenu(id));});
+bot.callbackQuery(/^strategy:menu:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();const s=await loadStrategySession(ctx,id);s.awaitingText=undefined;await render(ctx,strategyText(s.draft),strategyMenu(id));});
+bot.callbackQuery(/^strategy:save:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();const s=await loadStrategySession(ctx,id);try{const saved=await upsertTrainingStrategy(s.draft);strategySessions.delete(ctx.from!.id);await render(ctx,strategyText(saved),new InlineKeyboard().text('✏️ Изменить','strategy:edit:'+id).row().text('⬅️ Назад к клиенту','client:view:'+id));}catch(e){console.error('[STRATEGY SAVE FAILED]',e);await render(ctx,'❌ Не удалось сохранить стратегию.',strategyMenu(id));}});
 bot.callbackQuery(/client:view:(\d+)/,async ctx=>{const callbackData=ctx.callbackQuery.data;const parsedClientId=Number(ctx.match[1]);console.info('[CLIENT BUTTON CLICK] callback_data=%s parsed_client_id=%s',callbackData,parsedClientId);await ctx.answerCallbackQuery();console.info('[CLIENT SELECT] client_id=%s',parsedClientId);const client=await getClient(parsedClientId);if(!client){console.warn('[CLIENT NOT FOUND] client_id=%s',parsedClientId);await render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));return;}console.info('[CLIENT FOUND] client_id=%s',client.id);await render(ctx,clientCard(client),clientActions(client.id));});
 bot.callbackQuery(/client:edit:(\d+)/,async ctx=>{const callbackData=ctx.callbackQuery.data;const id=Number(ctx.match[1]);console.info('[EDIT CLIENT CLICK] callback_data=%s client_id=%s',callbackData,id);await ctx.answerCallbackQuery();const client=await getClient(id);if(!client){console.warn('[EDIT CLIENT NOT FOUND] client_id=%s',id);await render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));return;}console.info('[EDIT CLIENT FOUND] client_id=%s',client.id);await render(ctx,'✏️ <b>Что изменить?</b>',editMenu(client.id));});
 bot.callbackQuery(/client:delete:(\d+)/,async ctx=>{const callbackData=ctx.callbackQuery.data;const id=Number(ctx.match[1]);console.info('[DELETE CLIENT CLICK] callback_data=%s client_id=%s',callbackData,id);await ctx.answerCallbackQuery();const client=await getClient(id);if(!client){console.warn('[DELETE CLIENT NOT FOUND] client_id=%s',id);await render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));return;}console.info('[DELETE CLIENT FOUND] client_id=%s',client.id);await render(ctx,'⚠️ <b>Удалить клиента?</b>\n\n📱 Telegram: '+telegramLabel(client.telegram_username)+'\n\nЭто действие нельзя отменить.',new InlineKeyboard().text('🗑 Да, удалить','client:delete-confirm:'+client.id).row().text('⬅️ Отмена','client:view:'+client.id));});
