@@ -332,10 +332,10 @@ bot.on('message:text',async ctx=>{
     if(s.kind==='exercise'&&s.exercise){
       if(s.step==='name'){s.exercise.name=t;s.step='muscle';return ctx.reply('Введите мышечную группу:');}
       if(s.step==='muscle'){s.exercise.muscle_group=t==='Нет'?null:t;s.step='sets';return ctx.reply('Введите количество подходов:');}
-      if(s.step==='sets'){const n=Number(t);if(!/^\\d+$/.test(t)||n<1||n>20)return ctx.reply('Введите число подходов от 1 до 20.');s.exercise.sets=n;s.step='reps';return ctx.reply('Введите повторения (например, 8-10):');}
+      if(s.step==='sets'){const n=Number(t.trim());if(!Number.isInteger(n)||n<1||n>20)return ctx.reply('❌ Введите количество подходов целым числом от 1 до 20.');s.exercise.sets=n;s.step='reps';return ctx.reply('Введите количество повторений (например, 8-10):');}
       if(s.step==='reps'){s.exercise.reps=t;s.step='rest';return ctx.reply('Введите отдых в секундах или «Нет»:');}
-      if(s.step==='rest'){if(t==='Нет')s.exercise.rest_seconds=null;else{const n=Number(t);if(!/^\\d+$/.test(t)||n<0||n>900)return ctx.reply('Введите отдых от 0 до 900 секунд или «Нет».');s.exercise.rest_seconds=n;}s.step='rir';return ctx.reply('Введите RIR от 0 до 5 или «Нет»:');}
-      if(s.step==='rir'){if(t==='Нет')s.exercise.rir=null;else{const n=Number(t);if(!/^[0-5](?:\\.\\d+)?$/.test(t))return ctx.reply('Введите RIR от 0 до 5 или «Нет».');s.exercise.rir=n;}s.step='comment';return ctx.reply('Введите комментарий или «Нет»:');}
+      if(s.step==='rest'){if(t==='Нет')s.exercise.rest_seconds=null;else{const n=Number(t.trim());if(!Number.isInteger(n)||n<0||n>900)return ctx.reply('❌ Введите отдых целым числом от 0 до 900 секунд или «Нет».');s.exercise.rest_seconds=n;}s.step='rir';return ctx.reply('Введите RIR от 0 до 5 или «Нет»:');}
+      if(s.step==='rir'){if(t==='Нет')s.exercise.rir=null;else{const n=Number(t.trim());if(!Number.isFinite(n)||n<0||n>5)return ctx.reply('❌ Введите RIR от 0 до 5 или «Нет».');s.exercise.rir=n;}s.step='comment';return ctx.reply('Введите комментарий или «Нет»:');}
       if(s.step==='comment'){s.exercise.comment=t==='Нет'?null:t;const ex=await createTrainingProgramExercise(s.exercise as Omit<TrainingProgramExercise,'id'|'created_at'|'exercise_order'>);programSessions.delete(uid);return render(ctx,'✅ Упражнение добавлено.\\n\\n'+esc(ex.name),new InlineKeyboard().text('➕ Добавить ещё','program:exercise:new:'+ex.day_id).row().text('⬅️ К тренировке','program:day:'+ex.day_id));}
     }
   }
