@@ -256,7 +256,7 @@ function normalizeProgramText(value:string){
 }
 function formatProgramComment(comment:string){
   const normalized=normalizeProgramText(comment);
-  return normalized.split('\\n').map(line=>{
+  return normalized.split('\n').map(line=>{
     const t=line.trim();
     if(!t)return '';
     if(/^График:$/i.test(t))return '📅 <b>ГРАФИК</b>';
@@ -267,7 +267,7 @@ function formatProgramComment(comment:string){
     if(/^RIR:$/i.test(t))return '🎚 <b>RIR</b>';
     if(/^При накоплении выраженной усталости:$/i.test(t))return '🔄 <b>ПРИ НАКОПЛЕНИИ УСТАЛОСТИ</b>';
     return esc(line);
-  }).join('\\n').replace(/\\n{3,}/g,'\\n\\n');
+  }).join('\n').replace(/\n{3,}/g,'\n\n');
 }
 function formatExerciseLine(e:any,index:number){
   const details=[String(e.sets)+' × '+String(e.reps)];
@@ -277,7 +277,7 @@ function formatExerciseLine(e:any,index:number){
   if(e.muscle_group)lines.push('   💪 '+esc(e.muscle_group));
   lines.push('   '+details.join(' · '));
   if(e.comment && !/^Отдых:/i.test(String(e.comment)))lines.push('   📝 '+esc(normalizeProgramText(String(e.comment))));
-  return lines.join('\\n');
+  return lines.join('\n');
 }
 function programText(p:TrainingProgram|Omit<TrainingProgram,'created_at'|'updated_at'>,days:TrainingProgramDay[]){
   const lines=['🏋️ <b>'+esc(p.name)+'</b>'];
@@ -295,7 +295,7 @@ function programText(p:TrainingProgram|Omit<TrainingProgram,'created_at'|'update
     const formatted=formatProgramComment(p.comment);
     if(formatted)lines.push('',formatted);
   }
-  return lines.join('\\n');
+  return lines.join('\n');
 }
 function dayTitle(d:TrainingProgramDay){const clean=d.name.replace(/^(?:День\\s*\\d+\\s*[—-]?\\s*)+/i,'').trim();return '🏋️ <b>ДЕНЬ '+d.day_number+' — '+esc(clean||d.name)+'</b>';}
 function templateProgramText(t:any,days:any[],exercisesByDay:Record<number,any[]>){
@@ -318,7 +318,7 @@ function templateProgramText(t:any,days:any[],exercisesByDay:Record<number,any[]
     }
     lines.push('','━━━━━━━━━━━━');
   }
-  return lines.join('\\n').replace(/\\n{3,}/g,'\\n\\n');
+  return lines.join('\n').replace(/\n{3,}/g,'\n\n');
 }
 async function showProgram(ctx:Context,id:number){
   const c=await getClient(id);if(!c)return render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));
