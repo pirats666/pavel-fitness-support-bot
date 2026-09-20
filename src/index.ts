@@ -213,13 +213,16 @@ const STRATEGY_FIELDS:readonly (readonly [string,StrategyField])[]=[
 ];
 function blankStrategy(clientId:number):StrategyDraft{return {client_id:clientId,main_task:null,priorities:null,what_to_account_for:null,main_focus:null,trainer_decision:null};}
 function strategyText(s:StrategyDraft|TrainingStrategy){
-  const value=(v:string|null)=>v===null?'Не заполнено':esc(v);
+  const value=(v:string|null)=>{
+    if(v===null || !v.trim()) return 'Не заполнено';
+    return esc(v.replace(/\\r\\n/g,'\\n').trim());
+  };
   return ['🎯 <b>СТРАТЕГИЯ ТРЕНИРОВОК</b>','',
-    '🎯 <b>Основная задача:</b> '+value(s.main_task),
-    '⭐ <b>Приоритеты:</b> '+value(s.priorities),
-    '⚠️ <b>Что учитывать:</b> '+value(s.what_to_account_for),
-    '🔎 <b>Основной фокус:</b> '+value(s.main_focus),
-    '📝 <b>Решение тренера:</b> '+value(s.trainer_decision)].join('\\n');
+    '🎯 <b>Основная задача:</b>\\n'+value(s.main_task),'',
+    '⭐ <b>Приоритеты:</b>\\n'+value(s.priorities),'',
+    '⚠️ <b>Что учитывать:</b>\\n'+value(s.what_to_account_for),'',
+    '🔎 <b>Основной фокус:</b>\\n'+value(s.main_focus),'',
+    '📝 <b>Решение тренера:</b>\\n'+value(s.trainer_decision)].join('\\n');
 }
 function strategyMenu(id:number){
   const kb=new InlineKeyboard();
