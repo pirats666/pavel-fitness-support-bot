@@ -246,7 +246,7 @@ async function showStrategy(ctx:Context,id:number){
 }
 
 function formatProgramComment(comment:string){
-  const normalized=comment.replace(/\\n|\\/n/g,'\n').trim();
+  const normalized=comment.replace(/\\n/g,'\n').replace(/\/n/g,'\n').trim();
   return normalized.split('\n').map(line=>{
     const t=line.trim();
     if(!t)return '';
@@ -260,7 +260,7 @@ function formatProgramComment(comment:string){
 
 function programText(p:TrainingProgram|Omit<TrainingProgram,'created_at'|'updated_at'>,days:TrainingProgramDay[]){
   const lines=['🏋️ <b>'+esc(p.name)+'</b>'];
-  if(p.goal)lines.push('','🎯 <b>ЦЕЛЬ</b>',esc(p.goal.replace(/\\n|\\/n/g,'\n')));
+  if(p.goal)lines.push('','🎯 <b>ЦЕЛЬ</b>',esc(p.goal.replace(/\\n/g,'\n').replace(/\/n/g,'\n')));
   if(days.length){
     lines.push('','📅 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>');
     for(const d of days)lines.push('','День '+d.day_number+' — '+esc(d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'').trim()));
