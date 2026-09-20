@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
 import { Bot, InlineKeyboard, type Context } from 'grammy';
-import { closeDb, createClient, deleteClient, getClient, listClients, updateClientField, logDatabaseDiagnostics, migrateStage1Schema, migrateStage2AssessmentSchema, migrateStage3StrategySchema, getPrimaryAssessment, upsertPrimaryAssessment, getTrainingStrategy, upsertTrainingStrategy, migrateStage4ProgramSchema, getTrainingProgram, upsertTrainingProgram, listTrainingProgramDays, getTrainingProgramDay, createTrainingProgramDay, listTrainingProgramExercises, createTrainingProgramExercise, getTrainingProgramExercise, deleteTrainingProgramExercise } from './db.js';
+import { closeDb, createClient, deleteClient, getClient, listClients, updateClientField, logDatabaseDiagnostics, migrateStage1Schema, migrateStage2AssessmentSchema, migrateStage3StrategySchema, getPrimaryAssessment, upsertPrimaryAssessment, getTrainingStrategy, upsertTrainingStrategy, migrateStage4ProgramSchema, seedBaseFullBodyProgram, getTrainingProgram, upsertTrainingProgram, listTrainingProgramDays, getTrainingProgramDay, createTrainingProgramDay, listTrainingProgramExercises, createTrainingProgramExercise, getTrainingProgramExercise, deleteTrainingProgramExercise } from './db.js';
 import type { Client, ClientDraft, AddSession, PrimaryAssessment, TrainingStrategy, TrainingProgram, TrainingProgramDay, TrainingProgramExercise } from './types.js';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -360,7 +360,7 @@ bot.on('message:text',async ctx=>{
 });
 
 bot.catch(e=>console.error('Telegram bot error',e));
-void migrateStage1Schema().then(()=>migrateStage2AssessmentSchema()).then(()=>migrateStage3StrategySchema()).then(()=>migrateStage4ProgramSchema()).then(()=>logDatabaseDiagnostics()).catch(e=>{console.error('[DB MIGRATION] Failed:',e);process.exit(1);});
+void migrateStage1Schema().then(()=>migrateStage2AssessmentSchema()).then(()=>migrateStage3StrategySchema()).then(()=>migrateStage4ProgramSchema()).then(async()=>{const id=Number(process.env.SEED_BASE_FULL_BODY_CLIENT_ID);if(Number.isSafeInteger(id)&&id>0)await seedBaseFullBodyProgram(id);}).then(()=>logDatabaseDiagnostics()).catch(e=>{console.error('[DB MIGRATION] Failed:',e);process.exit(1);});
 const server=createServer((req,res)=>{if(req.url==='/health'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));return;}res.writeHead(404);res.end();});
 server.listen(PORT,()=>console.log('HTTP health server listening on '+PORT));
 async function shutdown(signal:string){console.log('Received '+signal+', shutting down');await bot.stop();await closeDb();server.close();process.exit(0);}
