@@ -343,6 +343,72 @@ export async function migrateStage4TemplateSchema(): Promise<void>{
     }
   }
 
+  const upperLower2Comment=`График:
+Пн — Верх тела
+Чт — Низ тела
+
+Между тренировками — минимум 2 дня восстановления.
+
+Интенсивность:
+• Базовые упражнения — RIR 2–3
+• Изоляция — RIR 1–2
+• Базовые упражнения — отдых 2–3 мин
+• Изоляция — отдых 60–90 сек
+
+Прогрессия:
+Работать в заданном диапазоне повторений.
+
+Пример:
+Жим штанги — 60 кг
+3 × 8 → 3 × 9 → 3 × 10
+
+После достижения верхней границы:
+увеличить вес и вернуться к нижней границе повторений.
+
+Главный принцип:
+↑ вес или ↑ повторения
+при сохранении техники и заданного RIR.`;
+  const upperLower2=await pool.query(`INSERT INTO public.coach_training_program_templates(name,goal,duration_weeks,comment)
+    VALUES($1,$2,NULL,$3) ON CONFLICT(name) DO UPDATE SET goal=EXCLUDED.goal,comment=EXCLUDED.comment,updated_at=NOW() RETURNING id`,
+    ['Базовая программа Upper / Lower — 2 дня в неделю','Развитие силы и мышечной массы при двух тренировках в неделю',upperLower2Comment]);
+  const upperLower2Id=upperLower2.rows[0].id;
+  const upperLower2Count=await pool.query('SELECT COUNT(*)::int AS count FROM public.coach_training_program_template_days WHERE template_id=$1',[upperLower2Id]);
+  if(upperLower2Count.rows[0].count===0){
+    const upperLower2Days=[
+      ['День 1 — Верх тела','Грудь, спина, плечи, бицепс и трицепс.'],
+      ['День 2 — Низ тела','Квадрицепс, задняя поверхность бедра, ягодичные, икроножные и мышцы кора.']
+    ];
+    const upperLower2Ex=[
+      [
+        ['Жим штанги лёжа','Грудь, трицепс, передняя дельта',3,'6–10',150,2],
+        ['Тяга верхнего блока / подтягивания','Широчайшие, бицепс',3,'8–12',150,2],
+        ['Жим гантелей на наклонной скамье','Верх груди, трицепс, передняя дельта',2,'8–12',150,2],
+        ['Тяга горизонтального блока','Широчайшие, ромбовидные, задняя дельта, бицепс',3,'8–12',150,2],
+        ['Жим гантелей сидя','Плечи, трицепс',2,'8–12',120,2],
+        ['Разведения гантелей в стороны','Средняя дельта',2,'12–15',75,1],
+        ['Сгибание рук с гантелями','Бицепс',2,'10–15',75,1],
+        ['Разгибание рук на верхнем блоке','Трицепс',2,'10–15',75,1]
+      ],
+      [
+        ['Присед со штангой','Квадрицепс, ягодичные, мышцы кора',3,'6–10',150,2],
+        ['Румынская тяга','Задняя поверхность бедра, ягодичные',3,'8–12',150,2],
+        ['Жим ногами','Квадрицепс, ягодичные',3,'10–12',150,2],
+        ['Болгарские выпады','Квадрицепс, ягодичные',2,'8–12 на каждую ногу',120,2],
+        ['Сгибание ног в тренажёре','Задняя поверхность бедра',2,'10–15',75,1],
+        ['Разгибание ног в тренажёре','Квадрицепс',2,'10–15',75,1],
+        ['Подъёмы на носки','Икроножные',3,'12–15',75,1],
+        ['Скручивания','Мышцы кора',3,'12–20',60,1]
+      ]
+    ];
+    for(let i=0;i<upperLower2Days.length;i++){
+      const d=await pool.query('INSERT INTO public.coach_training_program_template_days(template_id,day_number,name,comment) VALUES($1,$2,$3,$4) RETURNING id',[upperLower2Id,i+1,upperLower2Days[i][0],upperLower2Days[i][1]]);
+      for(let j=0;j<upperLower2Ex[i].length;j++){
+        const e=upperLower2Ex[i][j];
+        await pool.query('INSERT INTO public.coach_training_program_template_exercises(day_id,exercise_order,name,muscle_group,sets,reps,rest_seconds,rir,comment) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULL)',[d.rows[0].id,j+1,...e]);
+      }
+    }
+  }
+
 export async function listTrainingProgramTemplates():Promise<TrainingProgramTemplate[]>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates ORDER BY name');return rows;}
 export async function getTrainingProgramTemplate(id:number):Promise<TrainingProgramTemplate|null>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates WHERE id=$1',[id]);return rows[0]??null;}
 export async function listTrainingProgramTemplateDays(templateId:number):Promise<TrainingProgramTemplateDay[]>{const {rows}=await pool.query<TrainingProgramTemplateDay[]>('SELECT * FROM public.coach_training_program_template_days WHERE template_id=$1 ORDER BY day_number',[templateId]);return rows as any;}
