@@ -246,8 +246,8 @@ async function showStrategy(ctx:Context,id:number){
 }
 
 function formatProgramComment(comment:string){
-  const normalized=comment.replace(/\\\\n/g,'\\n').trim();
-  return normalized.split('\\n').map(line=>{
+  const normalized=comment.replace(/\\n|\\/n/g,'\n').trim();
+  return normalized.split('\n').map(line=>{
     const t=line.trim();
     if(!t)return '';
     if(/^График:$/i.test(t))return '📅 <b>ГРАФИК</b>';
@@ -255,22 +255,22 @@ function formatProgramComment(comment:string){
     if(/^Прогрессия:$/i.test(t))return '📈 <b>ПРОГРЕССИЯ</b>';
     if(/^Основной принцип:$/i.test(t))return '🎯 <b>ОСНОВНОЙ ПРИНЦИП</b>';
     return esc(line);
-  }).join('\\n');
+  }).join('\n');
 }
 
 function programText(p:TrainingProgram|Omit<TrainingProgram,'created_at'|'updated_at'>,days:TrainingProgramDay[]){
   const lines=['🏋️ <b>'+esc(p.name)+'</b>'];
-  if(p.goal)lines.push('','🎯 <b>ЦЕЛЬ</b>',''+esc(p.goal.replace(/\\\\n/g,'\\n')));
+  if(p.goal)lines.push('','🎯 <b>ЦЕЛЬ</b>',esc(p.goal.replace(/\\n|\\/n/g,'\n')));
   if(days.length){
     lines.push('','📅 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>');
-    for(const d of days)lines.push('','День '+d.day_number+' — '+esc(d.name.replace(/^День\\s*\\d+\\s*[—-]?\\s*/i,'').trim()));
+    for(const d of days)lines.push('','День '+d.day_number+' — '+esc(d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'').trim()));
   }else lines.push('','📅 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>','Не добавлены');
   if(p.duration_weeks)lines.push('','⏱ <b>СРОК</b> — '+p.duration_weeks+' нед.');
   if(p.comment){
     const formatted=formatProgramComment(p.comment);
     if(formatted)lines.push('','📝 <b>ПРАВИЛА И КОММЕНТАРИЙ</b>','',formatted);
   }
-  return lines.join('\\n');
+  return lines.join('\n');
 }
 function dayTitle(d:TrainingProgramDay){const clean=d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,'').trim();return `🏋️ <b>ДЕНЬ ${d.day_number} — ${esc(clean||d.name)}</b>`;}
 async function showProgram(ctx:Context,id:number){
