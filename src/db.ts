@@ -719,7 +719,7 @@ RIR:
     }
   }
 
-export async function listTrainingProgramTemplates():Promise<TrainingProgramTemplate[]>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates ORDER BY name');return rows;}
+export async function listTrainingProgramTemplates():Promise<TrainingProgramTemplate[]>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates ORDER BY COALESCE(catalog_order,9999), name');return rows;}
 export async function getTrainingProgramTemplate(id:number):Promise<TrainingProgramTemplate|null>{const {rows}=await pool.query<TrainingProgramTemplate>('SELECT * FROM public.coach_training_program_templates WHERE id=$1',[id]);return rows[0]??null;}
 export async function listTrainingProgramTemplateDays(templateId:number):Promise<TrainingProgramTemplateDay[]>{const {rows}=await pool.query<TrainingProgramTemplateDay[]>('SELECT * FROM public.coach_training_program_template_days WHERE template_id=$1 ORDER BY day_number',[templateId]);return rows as any;}
 export async function listTrainingProgramTemplateExercises(dayId:number):Promise<TrainingProgramTemplateExercise[]>{const {rows}=await pool.query<TrainingProgramTemplateExercise[]>('SELECT * FROM public.coach_training_program_template_exercises WHERE day_id=$1 ORDER BY exercise_order',[dayId]);return rows as any;}
@@ -814,3 +814,34 @@ export async function logDatabaseDiagnostics(): Promise<void> {
   }
 }
 
+
+
+export async function migrateTrainingProgramCatalogOrderSchema(): Promise<void> {
+  await pool.query(`
+    ALTER TABLE public.coach_training_program_templates
+      ADD COLUMN IF NOT EXISTS catalog_category TEXT,
+      ADD COLUMN IF NOT EXISTS catalog_order INTEGER
+  `);
+
+  const items = [
+    ['Full Body — 2 дня в неделю', '🟢 ДЛЯ НОВИЧКОВ', 1],
+    ['Full Body — 3 дня в неделю', '🟢 ДЛЯ НОВИЧКОВ', 2],
+    ['Базовая программа Upper / Lower — 2 дня в неделю', '🟢 ДЛЯ НОВИЧКОВ', 3],
+    ['БАЗОВАЯ ПРОГРАММА FULL BODY / UPPER / LOWER — 3 ДНЯ', '🟢 ДЛЯ НОВИЧКОВ', 4],
+    ['Базовая программа «Верх / Низ / Full Body» — 3 дня в неделю', '🟢 ДЛЯ НОВИЧКОВ', 5],
+    ['Базовая программа Push / Pull / Legs — 3 дня в неделю', '🟡 ДЛЯ СРЕДНЕГО УРОВНЯ', 6],
+    ['Базовая программа PUSH / PULL / LEGS — 6 ДНЕЙ В НЕДЕЛЮ', '🟡 ДЛЯ СРЕДНЕГО УРОВНЯ', 7],
+    ['Базовый сплит — 3 дня в неделю', '🟡 ДЛЯ СРЕДНЕГО УРОВНЯ', 8],
+    ['Базовый сплит — 4 дня в неделю', '🟡 ДЛЯ СРЕДНЕГО УРОВНЯ', 9],
+    ['Базовая программа «Ноги / Верх» — 3 дня в неделю', '🟡 ДЛЯ СРЕДНЕГО УРОВНЯ', 10],
+    ['Базовая программа Full Body + специализация — 3 дня', '🔵 АКЦЕНТ НА МЫШЕЧНУЮ ГРУППУ', 11],
+    ['БАЗОВАЯ ПРОГРАММА UPPER / LOWER + СПЕЦИАЛИЗАЦИЯ — 3 ДНЯ', '🔵 АКЦЕНТ НА МЫШЕЧНУЮ ГРУППУ', 12]
+  ];
+
+  for (const [name, category, order] of items) {
+    await pool.query(
+      'UPDATE public.coach_training_program_templates SET catalog_category=$2,catalog_order=$3,updated_at=NOW() WHERE name=$1',
+      [name, category, order]
+    );
+  }
+}
