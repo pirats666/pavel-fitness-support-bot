@@ -570,7 +570,7 @@ bot.on('message:text',async ctx=>{
 });
 
 bot.catch(e=>console.error('Telegram bot error',e));
-void migrateStage1Schema().then(()=>migrateStage2AssessmentSchema()).then(()=>migrateStage3StrategySchema()).then(()=>migrateStage4ProgramSchema()).then(()=>migrateStage4TemplateSchema()).then(()=>migrateTrainingProgramCatalogOrderSchema()).then(()=>migrateNextBaseTemplateSchema()).then(()=>migrateFollowingBaseTemplateSchema()).then(()=>migrateUpperLowerSpecializationTemplateSchema()).then(()=>migrateFullBodyUpperLowerTemplateSchema()).then(()=>migratePplSpecializationTemplateSchema()).then(()=>logDatabaseDiagnostics()).catch(e=>{console.error('[DB MIGRATION] Failed:',e);process.exit(1);});
+void migrateStage1Schema().then(()=>migrateStage2AssessmentSchema()).then(()=>migrateStage3StrategySchema()).then(()=>migrateStage4ProgramSchema()).then(()=>migrateStage4TemplateSchema()).then(()=>migrateNextBaseTemplateSchema()).then(()=>migrateFollowingBaseTemplateSchema()).then(()=>migrateUpperLowerSpecializationTemplateSchema()).then(()=>migrateFullBodyUpperLowerTemplateSchema()).then(()=>migratePplSpecializationTemplateSchema()).then(()=>migrateTrainingProgramCatalogOrderSchema()).then(()=>logDatabaseDiagnostics()).catch(e=>{console.error('[DB MIGRATION] Failed:',e);process.exit(1);});
 const server=createServer((req,res)=>{if(req.url==='/health'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));return;}res.writeHead(404);res.end();});
 server.listen(PORT,()=>console.log('HTTP health server listening on '+PORT));
 async function shutdown(signal:string){console.log('Received '+signal+', shutting down');await bot.stop();await closeDb();server.close();process.exit(0);}
