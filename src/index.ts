@@ -348,21 +348,8 @@ async function showProgramCatalogGroups(ctx:Context,id:number){
 }
 
 async function showHypertrophyProgramCatalog(ctx:Context,id:number){
-  const templates=await listTrainingProgramTemplates();
-  const selected=templates.filter((t:any)=>String(t.goal??'').toLowerCase().includes('гипертроф'));
-  const kb=new InlineKeyboard();
-  for(const t of selected){
-    const order=Number((t as any).catalog_order);
-    let label=(t as any).catalog_display_name || t.name;
-    label=label.replace(/^БАЗОВАЯ ПРОГРАММА\s+/i,'').replace(/^Базовая программа\s+/i,'');
-    const prefix=Number.isFinite(order) ? order+'. ' : '';
-    kb.text(prefix+label,'program:template:'+t.id+':'+id).row();
-  }
-  kb.text('⬅️ К группам','program:templates:'+id);
-  const text=selected.length
-    ? '📚 <b>🔴 УПОР НА ГИПЕРТРОФИЮ</b>\n\nВыберите программу:'
-    : '📚 <b>🔴 УПОР НА ГИПЕРТРОФИЮ</b>\n\nПрограммы с таким приоритетом пока не добавлены.';
-  await render(ctx,text,kb);
+  const kb=new InlineKeyboard().text('⬅️ К группам','program:templates:'+id);
+  await render(ctx,'📚 <b>🔴 УПОР НА ГИПЕРТРОФИЮ</b>\n\nПрограммы пока не добавлены. Сюда будем заносить их отдельно после вашего согласования.',kb);
 }
 
 async function showProgramCatalogGroup(ctx:Context,groupKey:string,id:number){
