@@ -336,10 +336,7 @@ export async function migrateFullBodyUpperLowerTemplateSchema(): Promise<void> {
     'SELECT COUNT(*)::int AS count FROM public.coach_training_program_template_days WHERE template_id=$1',
     [templateId]
   );
-  if (existing.rows[0].count > 0) {
-    await migratePplSpecializationTemplateSchema();
-    return;
-  }
+  if (existing.rows[0].count > 0) return;
 
   const days = [
     ['День 1 — Full Body', 'Full Body'],
@@ -392,7 +389,6 @@ export async function migrateFullBodyUpperLowerTemplateSchema(): Promise<void> {
       );
     }
   }
-  await migratePplSpecializationTemplateSchema();
 }
 
 
@@ -433,21 +429,14 @@ export async function migratePplSpecializationTemplateSchema(): Promise<void> {
 • Ноги — дополнительный объём в Legs-дни.`;
 
   const { rows } = await pool.query(
-    `INSERT INTO public.coach_training_program_templates(name,goal,duration_weeks,comment,catalog_category,catalog_order)
-     VALUES($1,$2,NULL,$3,$4,$5)
-     ON CONFLICT(name) DO UPDATE SET
-       goal=EXCLUDED.goal,
-       comment=EXCLUDED.comment,
-       catalog_category=EXCLUDED.catalog_category,
-       catalog_order=EXCLUDED.catalog_order,
-       updated_at=NOW()
+    `INSERT INTO public.coach_training_program_templates(name,goal,duration_weeks,comment)
+     VALUES($1,$2,NULL,$3)
+     ON CONFLICT(name) DO UPDATE SET goal=EXCLUDED.goal,comment=EXCLUDED.comment,updated_at=NOW()
      RETURNING id`,
     [
       'БАЗОВАЯ ПРОГРАММА PUSH / PULL / LEGS + ДОПОЛНИТЕЛЬНЫЙ ОБЪЁМ — 6 ДНЕЙ',
       'Гипертрофия + акцент на выбранную мышечную группу',
-      comment,
-      '🔵 АКЦЕНТ НА МЫШЕЧНУЮ ГРУППУ',
-      13
+      comment
     ]
   );
   const templateId = rows[0].id;
