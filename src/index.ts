@@ -330,7 +330,7 @@ bot.callbackQuery(/^program:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);aw
 const PROGRAM_CATALOG_GROUPS = [
   { key:'beginners', title:'🟢 ДЛЯ НОВИЧКОВ', category:'🟢 ДЛЯ НОВИЧКОВ' },
   { key:'intermediate', title:'🟡 ДЛЯ СРЕДНЕГО УРОВНЯ', category:'🟡 ДЛЯ СРЕДНЕГО УРОВНЯ' },
-  { key:'specialization', title:'🔵 АКЦЕНТ НА МЫШЕЧНУЮ ГРУППУ', category:'🔵 АКЦЕНТ НА МЫШЕЧНУЮ ГРУППУ' }
+  { key:'specialization', title:'🔵 АКЦЕНТ НА ОТДЕЛЬНУЮ МЫШЕЧНУЮ ГРУППУ', category:'🔵 АКЦЕНТ НА ОТДЕЛЬНУЮ МЫШЕЧНУЮ ГРУППУ' }
 ] as const;
 
 function programCatalogGroup(category:string|null|undefined){
@@ -349,11 +349,11 @@ async function showProgramCatalogGroups(ctx:Context,id:number){
 
 async function showHypertrophyProgramCatalog(ctx:Context,id:number){
   const templates=await listTrainingProgramTemplates();
-  const selected=templates.filter((t:any)=>t.catalog_category==='🔴 УПОР НА ГИПЕРТРОФИЮ');
+  const selected=templates.filter((t:any)=>t.catalog_category==='🔴 УПОР НА ГИПЕРТРОФИЮ ОДНОЙ МЫШЕЧНОЙ ГРУППЫ');
   const kb=new InlineKeyboard();
   for(const t of selected) kb.text((t as any).name,'program:template:'+t.id+':'+id).row();
   kb.text('⬅️ К группам','program:templates:'+id);
-  await render(ctx,'📚 <b>🔴 УПОР НА ГИПЕРТРОФИЮ</b>\n\n'+(selected.length?'Выберите программу:':'Программы пока не добавлены.'),kb);
+  await render(ctx,'📚 <b>🔴 УПОР НА ГИПЕРТРОФИЮ ОДНОЙ МЫШЕЧНОЙ ГРУППЫ</b>\n\n'+(selected.length?'Выберите программу:':'Программы пока не добавлены.'),kb);
 }
 
 async function showProgramCatalogGroup(ctx:Context,groupKey:string,id:number){
