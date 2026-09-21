@@ -816,6 +816,74 @@ export async function logDatabaseDiagnostics(): Promise<void> {
 
 
 
+
+export async function migrateHypertrophyProgramTemplate(): Promise<void> {
+  const comment = `Частота: 3 раза в неделю
+Другие мышечные группы: не тренируются целенаправленно
+
+ПРОГРЕССИЯ
+Для жимов:
+3×8 → 3×9 → 3×10
+После достижения верхней границы диапазона:
+увеличить вес → вернуться к нижней границе повторений.
+
+Для изоляции:
+3×12 → 3×13 → 3×14 → 3×15
+затем небольшое увеличение нагрузки.
+
+ИНТЕНСИВНОСТЬ
+Базовые жимы:
+RIR 2–3
+
+Изолирующие упражнения:
+RIR 1–2
+
+Не выполнять каждый подход до отказа.
+
+ОТДЫХ
+Жимы:
+2–3 минуты
+
+Изоляция:
+60–90 секунд
+
+ВАЖНО
+Главная задача — не максимальное количество упражнений,
+а постепенное увеличение качественной нагрузки на грудные.
+
+При ухудшении техники вес не увеличивать.
+
+Если производительность и восстановление заметно ухудшается,
+объём необходимо уменьшить.`;
+  const result = await pool.query(`INSERT INTO public.coach_training_program_templates(name,goal,duration_weeks,comment,catalog_category,catalog_order)
+    VALUES($1,$2,NULL,$3,$4,$5)
+    ON CONFLICT(name) DO UPDATE SET goal=EXCLUDED.goal,comment=EXCLUDED.comment,catalog_category=EXCLUDED.catalog_category,catalog_order=EXCLUDED.catalog_order,updated_at=NOW()
+    RETURNING id`,['ПРОГРАММА МАКСИМАЛЬНЫЙ АКЦЕНТ НА ГРУДНЫЕ ×3','Развитие и гипертрофия грудных мышц',comment,'🔴 УПОР НА ГИПЕРТРОФИЮ',1001]);
+  const templateId=Number(result.rows[0].id);
+  const days=[['ТЯЖЁЛЫЙ АКЦЕНТ','10 рабочих подходов'],['СРЕДНИЙ ОБЪЁМ','11 рабочих подходов'],['КОНТРОЛЬ И РАСТЯЖЕНИЕ','11 рабочих подходов']];
+  const exercises=[
+    [['Жим штанги лёжа',3,'6–8',150,2],['Жим гантелей на наклонной скамье',3,'8–10',150,2],['Жим в тренажёре на грудь',2,'8–12',120,2],['Сведение рук в тренажёре',2,'12–15',75,1]],
+    [['Жим гантелей лёжа',3,'8–12',150,2],['Жим в тренажёре под небольшим наклоном',3,'8–12',120,2],['Кроссовер',3,'10–15',75,1],['Сведение рук в тренажёре',2,'12–15',75,1]],
+    [['Жим в тренажёре на грудь',3,'8–12',120,2],['Жим гантелей на наклонной скамье',3,'10–12',150,2],['Кроссовер',3,'12–15',75,1],['Сведение рук в тренажёре',2,'12–15',75,1]]
+  ];
+  const dayIds:number[]=[];
+  for(let i=0;i<days.length;i++){
+    const r=await pool.query(`INSERT INTO public.coach_training_program_template_days(template_id,day_number,name,comment)
+      SELECT $1,$2,$3,$4 WHERE NOT EXISTS(SELECT 1 FROM public.coach_training_program_template_days WHERE template_id=$1 AND day_number=$2) RETURNING id`,[templateId,i+1,days[i][0],days[i][1]]);
+    if(r.rows[0]?.id) dayIds.push(Number(r.rows[0].id));
+    else { const existing=await pool.query('SELECT id FROM public.coach_training_program_template_days WHERE template_id=$1 AND day_number=$2',[templateId,i+1]); dayIds.push(Number(existing.rows[0].id)); }
+  }
+  for(let d=0;d<exercises.length;d++){
+    const count=await pool.query('SELECT COUNT(*)::int AS count FROM public.coach_training_program_template_exercises WHERE day_id=$1',[dayIds[d]]);
+    if(Number(count.rows[0].count)>0) continue;
+    for(let i=0;i<exercises[d].length;i++){
+      const e=exercises[d][i];
+      await pool.query(`INSERT INTO public.coach_training_program_template_exercises(day_id,exercise_order,name,muscle_group,sets,reps,rest_seconds,rir,comment)
+        VALUES($1,$2,$3,'Грудь',$4,$5,$6,$7,NULL)`,[dayIds[d],i+1,e[0],e[1],e[2],e[3],e[4]]);
+    }
+  }
+}
+
 export async function migrateTrainingProgramCatalogOrderSchema(): Promise<void> {
   await pool.query(`
     ALTER TABLE public.coach_training_program_templates
