@@ -429,14 +429,21 @@ export async function migratePplSpecializationTemplateSchema(): Promise<void> {
 • Ноги — дополнительный объём в Legs-дни.`;
 
   const { rows } = await pool.query(
-    `INSERT INTO public.coach_training_program_templates(name,goal,duration_weeks,comment)
-     VALUES($1,$2,NULL,$3)
-     ON CONFLICT(name) DO UPDATE SET goal=EXCLUDED.goal,comment=EXCLUDED.comment,updated_at=NOW()
+    `INSERT INTO public.coach_training_program_templates(name,goal,duration_weeks,comment,catalog_category,catalog_order)
+     VALUES($1,$2,NULL,$3,$4,$5)
+     ON CONFLICT(name) DO UPDATE SET
+       goal=EXCLUDED.goal,
+       comment=EXCLUDED.comment,
+       catalog_category=EXCLUDED.catalog_category,
+       catalog_order=EXCLUDED.catalog_order,
+       updated_at=NOW()
      RETURNING id`,
     [
       'БАЗОВАЯ ПРОГРАММА PUSH / PULL / LEGS + ДОПОЛНИТЕЛЬНЫЙ ОБЪЁМ — 6 ДНЕЙ',
       'Гипертрофия + акцент на выбранную мышечную группу',
-      comment
+      comment,
+      '🔵 АКЦЕНТ НА МЫШЕЧНУЮ ГРУППУ',
+      13
     ]
   );
   const templateId = rows[0].id;
