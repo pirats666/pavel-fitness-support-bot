@@ -327,7 +327,50 @@ async function showProgram(ctx:Context,id:number){
   await render(ctx,programText(p,days),new InlineKeyboard().text('📚 База программ','program:templates:'+id).row().text('➕ Добавить день','program:day:new:'+id).row().text('📋 Тренировочные дни','program:days:'+id).row().text('✏️ Скорректировать программу','program:edit:'+id).row().text('🗑 Удалить программу','program:delete:'+id).row().text('⬅️ Назад к клиенту','client:view:'+id));
 }
 bot.callbackQuery(/^program:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();await showProgram(ctx,id);});
-bot.callbackQuery(/^program:templates:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();const ts=await listTrainingProgramTemplates();const kb=new InlineKeyboard();for(const t of ts)kb.text('📋 '+t.name,'program:template:'+t.id+':'+id).row();kb.text('⬅️ К программе','program:'+id);await render(ctx,'📚 <b>БАЗА ТРЕНИРОВОЧНЫХ ПРОГРАММ</b>\n\nВыберите базовую программу:',kb);});
+const PROGRAM_CATALOG_GROUPS = [
+  { key:'beginners', title:'🟢 ДЛЯ НОВИЧКОВ', min:1, max:5 },
+  { key:'intermediate', title:'🟡 ДЛЯ СРЕДНЕГО УРОВНЯ', min:6, max:10 },
+  { key:'specialization', title:'🔵 АКЦЕНТ НА МЫШЕЧНУЮ ГРУППУ', min:11, max:13 }
+] as const;
+
+function programCatalogGroup(order:number|null|undefined){
+  return PROGRAM_CATALOG_GROUPS.find(g=>order!==null && order!==undefined && order>=g.min && order<=g.max);
+}
+
+async function showProgramCatalogGroups(ctx:Context,id:number){
+  const kb=new InlineKeyboard()
+    .text('🟢 Для новичков','program:catalog-group:beginners:'+id).row()
+    .text('🟡 Для среднего уровня','program:catalog-group:intermediate:'+id).row()
+    .text('🔵 Акцент на мышечную группу','program:catalog-group:specialization:'+id).row()
+    .text('⬅️ К программе','program:'+id);
+  await render(ctx,'📚 <b>ТРЕНИРОВОЧНЫЕ ПРОГРАММЫ</b>\n\nВыберите группу:',kb);
+}
+
+async function showProgramCatalogGroup(ctx:Context,groupKey:string,id:number){
+  const group=PROGRAM_CATALOG_GROUPS.find(g=>g.key===groupKey);
+  if(!group)return showProgramCatalogGroups(ctx,id);
+  const templates=await listTrainingProgramTemplates();
+  const selected=templates.filter((t:any)=>{
+    const order=Number(t.catalog_order);
+    return Number.isFinite(order) && order>=group.min && order<=group.max;
+  });
+  const kb=new InlineKeyboard();
+  for(const t of selected){
+    const order=Number((t as any).catalog_order);
+    let label=(t as any).catalog_display_name || t.name;
+    label=label.replace(/^БАЗОВАЯ ПРОГРАММА\s+/i,'').replace(/^Базовая программа\s+/i,'');
+    kb.text(order+'. '+label,'program:template:'+t.id+':'+id).row();
+  }
+  kb.text('⬅️ К группам','program:templates:'+id);
+  await render(ctx,'📚 <b>'+esc(group.title)+'</b>\n\nВыберите программу:',kb);
+}
+
+bot.callbackQuery(/^program:templates:(\d+)$/,async ctx=>{
+  const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();await showProgramCatalogGroups(ctx,id);
+});
+bot.callbackQuery(/^program:catalog-group:(beginners|intermediate|specialization):(\d+)$/,async ctx=>{
+  const group=ctx.match[1];const id=Number(ctx.match[2]);await ctx.answerCallbackQuery();await showProgramCatalogGroup(ctx,group,id);
+});
 bot.callbackQuery(/^program:template:(\d+):(\d+)$/,async ctx=>{const tid=Number(ctx.match[1]),id=Number(ctx.match[2]);await ctx.answerCallbackQuery();const t=await getTrainingProgramTemplate(tid);if(!t)return;const days=await listTrainingProgramTemplateDays(tid);const exercisesByDay:Record<number,any[]>={};for(const d of days)exercisesByDay[d.id]=await listTrainingProgramTemplateExercises(d.id);const kb=new InlineKeyboard().text('📥 Загрузить клиенту','program:template-apply:'+tid+':'+id).row().text('⬅️ К базе программ','program:templates:'+id);await render(ctx,templateProgramText(t,days,exercisesByDay),kb);});
 bot.callbackQuery(/^program:template-apply:(\d+):(\d+)$/,async ctx=>{const tid=Number(ctx.match[1]),id=Number(ctx.match[2]);await ctx.answerCallbackQuery();const saved=await applyTrainingProgramTemplate(id,tid);await render(ctx,'✅ Базовая программа загружена в карточку клиента.\n\n'+programText(saved,await listTrainingProgramDays(id)),new InlineKeyboard().text('✏️ Скорректировать программу','program:edit:'+id).row().text('⬅️ К клиенту','client:view:'+id));});
 bot.callbackQuery(/^program:(?:new|edit):(\d+)$/,async ctx=>{
