@@ -328,13 +328,13 @@ async function showProgram(ctx:Context,id:number){
 }
 bot.callbackQuery(/^program:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();await showProgram(ctx,id);});
 const PROGRAM_CATALOG_GROUPS = [
-  { key:'beginners', title:'🟢 ДЛЯ НОВИЧКОВ', min:1, max:5 },
-  { key:'intermediate', title:'🟡 ДЛЯ СРЕДНЕГО УРОВНЯ', min:6, max:10 },
-  { key:'specialization', title:'🔵 АКЦЕНТ НА МЫШЕЧНУЮ ГРУППУ', min:11, max:13 }
+  { key:'beginners', title:'🟢 ДЛЯ НОВИЧКОВ', category:'🟢 ДЛЯ НОВИЧКОВ' },
+  { key:'intermediate', title:'🟡 ДЛЯ СРЕДНЕГО УРОВНЯ', category:'🟡 ДЛЯ СРЕДНЕГО УРОВНЯ' },
+  { key:'specialization', title:'🔵 АКЦЕНТ НА МЫШЕЧНУЮ ГРУППУ', category:'🔵 АКЦЕНТ НА МЫШЕЧНУЮ ГРУППУ' }
 ] as const;
 
-function programCatalogGroup(order:number|null|undefined){
-  return PROGRAM_CATALOG_GROUPS.find(g=>order!==null && order!==undefined && order>=g.min && order<=g.max);
+function programCatalogGroup(category:string|null|undefined){
+  return PROGRAM_CATALOG_GROUPS.find(g=>category===g.category);
 }
 
 async function showProgramCatalogGroups(ctx:Context,id:number){
@@ -360,10 +360,9 @@ async function showProgramCatalogGroup(ctx:Context,groupKey:string,id:number){
   const group=PROGRAM_CATALOG_GROUPS.find(g=>g.key===groupKey);
   if(!group)return showProgramCatalogGroups(ctx,id);
   const templates=await listTrainingProgramTemplates();
-  const selected=templates.filter((t:any)=>{
-    const order=Number(t.catalog_order);
-    return Number.isFinite(order) && order>=group.min && order<=group.max;
-  });
+  const selected=templates
+    .filter((t:any)=>t.catalog_category===group.category)
+    .sort((a:any,b:any)=>Number(a.catalog_order)-Number(b.catalog_order));
   const kb=new InlineKeyboard();
   for(const t of selected){
     const order=Number((t as any).catalog_order);
@@ -385,7 +384,30 @@ bot.callbackQuery(/^program:catalog-group:hypertrophy:(\d+)$/,async ctx=>{
   const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();await showHypertrophyProgramCatalog(ctx,id);
 });
 bot.callbackQuery(/^program:template:(\d+):(\d+)$/,async ctx=>{const tid=Number(ctx.match[1]),id=Number(ctx.match[2]);await ctx.answerCallbackQuery();const t=await getTrainingProgramTemplate(tid);if(!t)return;const days=await listTrainingProgramTemplateDays(tid);const exercisesByDay:Record<number,any[]>={};for(const d of days)exercisesByDay[d.id]=await listTrainingProgramTemplateExercises(d.id);const kb=new InlineKeyboard().text('📥 Загрузить клиенту','program:template-apply:'+tid+':'+id).row().text('⬅️ К базе программ','program:templates:'+id);await render(ctx,templateProgramText(t,days,exercisesByDay),kb);});
-bot.callbackQuery(/^program:template-apply:(\d+):(\d+)$/,async ctx=>{const tid=Number(ctx.match[1]),id=Number(ctx.match[2]);await ctx.answerCallbackQuery();const saved=await applyTrainingProgramTemplate(id,tid);await render(ctx,'✅ Базовая программа загружена в карточку клиента.\n\n'+programText(saved,await listTrainingProgramDays(id)),new InlineKeyboard().text('✏️ Скорректировать программу','program:edit:'+id).row().text('⬅️ К клиенту','client:view:'+id));});
+async function applyTemplateToClient(ctx:Context,tid:number,id:number){
+  try{
+    const saved=await applyTrainingProgramTemplate(id,tid);
+    await render(ctx,'✅ Базовая программа загружена в карточку клиента.\n\n'+programText(saved,await listTrainingProgramDays(id)),new InlineKeyboard().text('✏️ Скорректировать программу','program:edit:'+id).row().text('⬅️ К клиенту','client:view:'+id));
+  }catch(e){
+    console.error('[PROGRAM TEMPLATE APPLY FAILED]',e);
+    await render(ctx,'❌ Не удалось загрузить базовую программу. Данные клиента не изменены.',new InlineKeyboard().text('⬅️ К базе программ','program:templates:'+id).row().text('⬅️ К клиенту','client:view:'+id));
+  }
+}
+bot.callbackQuery(/^program:template-apply:(\d+):(\d+)$/,async ctx=>{
+  const tid=Number(ctx.match[1]),id=Number(ctx.match[2]);
+  await ctx.answerCallbackQuery();
+  const existing=await getTrainingProgram(id);
+  if(existing){
+    await render(ctx,'⚠️ <b>У клиента уже есть тренировочная программа.</b>\n\nЗагрузка базы полностью заменит текущую программу, включая тренировочные дни и упражнения.\n\nПродолжить?',new InlineKeyboard().text('⚠️ Да, заменить','program:template-apply-confirm:'+tid+':'+id).row().text('⬅️ Отмена','program:template:'+tid+':'+id));
+    return;
+  }
+  await applyTemplateToClient(ctx,tid,id);
+});
+bot.callbackQuery(/^program:template-apply-confirm:(\d+):(\d+)$/,async ctx=>{
+  const tid=Number(ctx.match[1]),id=Number(ctx.match[2]);
+  await ctx.answerCallbackQuery();
+  await applyTemplateToClient(ctx,tid,id);
+});
 bot.callbackQuery(/^program:(?:new|edit):(\d+)$/,async ctx=>{
   const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();
   const p=await getTrainingProgram(id);
