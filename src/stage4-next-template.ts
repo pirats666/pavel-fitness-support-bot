@@ -336,7 +336,10 @@ export async function migrateFullBodyUpperLowerTemplateSchema(): Promise<void> {
     'SELECT COUNT(*)::int AS count FROM public.coach_training_program_template_days WHERE template_id=$1',
     [templateId]
   );
-  if (existing.rows[0].count > 0) return;
+  if (existing.rows[0].count > 0) {
+    await migratePplSpecializationTemplateSchema();
+    return;
+  }
 
   const days = [
     ['День 1 — Full Body', 'Full Body'],
@@ -389,6 +392,7 @@ export async function migrateFullBodyUpperLowerTemplateSchema(): Promise<void> {
       );
     }
   }
+  await migratePplSpecializationTemplateSchema();
 }
 
 
