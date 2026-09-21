@@ -1121,4 +1121,66 @@ export async function migrateTrainingProgramCatalogOrderSchema(): Promise<void> 
   }
 }
 
+export async function migrateCanonicalTrainingProgramLibrary(): Promise<void> {
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query(`DELETE FROM public.coach_training_program_templates WHERE name IN (
+      'Базовая программа Push / Pull — 2 дня в неделю',
+      'БАЗОВАЯ ПРОГРАММА FULL BODY / UPPER / LOWER — 3 ДНЯ'
+    )`);
+    const renames: Array<[string,string]> = [
+      ['Full Body — 2 дня в неделю','Full Body ×2'],
+      ['Full Body — 3 дня в неделю','Full Body ×3'],
+      ['Базовая программа Upper / Lower — 2 дня в неделю','Upper / Lower ×2'],
+      ['Базовая программа «Верх / Низ / Full Body» — 3 дня в неделю','Upper / Lower / Full Body ×3'],
+      ['Базовая программа Push / Pull / Legs — 3 дня в неделю','Push / Pull / Legs ×3'],
+      ['Базовый сплит — 3 дня в неделю','Классический сплит ×3'],
+      ['Базовая программа «Ноги / Верх» — 3 дня в неделю','Legs / Upper / Legs ×3'],
+      ['Базовый сплит — 4 дня в неделю','Классический сплит ×4'],
+      ['Базовая программа Push / Pull / Legs — 6 дней в неделю','Push / Pull / Legs ×6'],
+      ['Базовая программа Full Body + специализация — 3 дня','Full Body + специализация ×3'],
+      ['БАЗОВАЯ ПРОГРАММА UPPER / LOWER + СПЕЦИАЛИЗАЦИЯ — 3 ДНЯ','Upper / Lower + специализация ×3'],
+      ['БАЗОВАЯ ПРОГРАММА PUSH / PULL / LEGS + ДОПОЛНИТЕЛЬНЫЙ ОБЪЁМ — 6 ДНЕЙ','Push / Pull / Legs + дополнительный объём выбранной группы ×6'],
+      ['ПРОГРАММА МАКСИМАЛЬНЫЙ АКЦЕНТ НА ГРУДНЫЕ ×3','Максимальный акцент на грудные ×3'],
+      ['ПРОГРАММА МАКСИМАЛЬНЫЙ АКЦЕНТ НА ШИРОЧАЙШИЕ ×3','Максимальный акцент на широчайшие ×3']
+    ];
+    for (const [oldName,newName] of renames) {
+      const oldRow=await c.query('SELECT id FROM public.coach_training_program_templates WHERE name=$1',[oldName]);
+      if(!oldRow.rows[0]) continue;
+      const newRow=await c.query('SELECT id FROM public.coach_training_program_templates WHERE name=$1',[newName]);
+      if(newRow.rows[0]) await c.query('DELETE FROM public.coach_training_program_templates WHERE id=$1',[oldRow.rows[0].id]);
+      else await c.query('UPDATE public.coach_training_program_templates SET name=$2,updated_at=NOW() WHERE id=$1',[oldRow.rows[0].id,newName]);
+    }
+    const catalog = [
+      ['Full Body ×2','🟢 ДЛЯ НОВИЧКОВ',1],['Full Body ×3','🟢 ДЛЯ НОВИЧКОВ',2],
+      ['Upper / Lower ×2','🟢 ДЛЯ НОВИЧКОВ',3],['Upper / Lower / Full Body ×3','🟢 ДЛЯ НОВИЧКОВ',4],
+      ['Push / Pull / Legs ×3','🟡 ДЛЯ СРЕДНЕГО УРОВНЯ',5],['Классический сплит ×3','🟡 ДЛЯ СРЕДНЕГО УРОВНЯ',6],
+      ['Legs / Upper / Legs ×3','🟡 ДЛЯ СРЕДНЕГО УРОВНЯ',7],['Классический сплит ×4','🟡 ДЛЯ СРЕДНЕГО УРОВНЯ',8],
+      ['Push / Pull / Legs ×6','🟡 ДЛЯ СРЕДНЕГО УРОВНЯ',9],
+      ['Full Body + специализация ×3','🔵 АКЦЕНТ НА ОТДЕЛЬНУЮ МЫШЕЧНУЮ ГРУППУ',10],
+      ['Upper / Lower + специализация ×3','🔵 АКЦЕНТ НА ОТДЕЛЬНУЮ МЫШЕЧНУЮ ГРУППУ',11],
+      ['Push / Pull / Legs + дополнительный объём выбранной группы ×6','🔵 АКЦЕНТ НА ОТДЕЛЬНУЮ МЫШЕЧНУЮ ГРУППУ',12],
+      ['Максимальный акцент на грудные ×3','🔴 УПОР НА ГИПЕРТРОФИЮ ОДНОЙ МЫШЕЧНОЙ ГРУППЫ',13],
+      ['Максимальный акцент на широчайшие ×3','🔴 УПОР НА ГИПЕРТРОФИЮ ОДНОЙ МЫШЕЧНОЙ ГРУППЫ',14]
+    ];
+    for(const [name,category,order] of catalog) await c.query('UPDATE public.coach_training_program_templates SET catalog_category=$2,catalog_order=$3,updated_at=NOW() WHERE name=$1',[name,category,order]);
+    const aliases: Array<[string,string]> = [
+      ['Жим лёжа','Жим штанги лёжа'],['Жим штанги','Жим штанги лёжа'],
+      ['Тяга верхнего блока','Тяга верхнего блока к груди'],['Пуловер в блоке','Пуловер в верхнем блоке'],
+      ['Тяга верхнего блока прямыми руками','Пуловер в верхнем блоке'],['Кроссовер','Сведение рук в кроссовере'],
+      ['Разгибание рук на блоке','Разгибание рук на верхнем блоке'],['Разгибание ног','Разгибание ног в тренажёре'],
+      ['Сгибание ног','Сгибание ног в тренажёре'],['Подъём штанги на бицепс','Сгибание рук со штангой'],
+      ['Молотковые сгибания с гантелями','Молотковые сгибания'],['Болгарский сплит-присед','Болгарские выпады'],
+      ['Жим в тренажёре','Жим в тренажёре на грудь'],['Жим гантелей вверх','Жим гантелей сидя'],
+      ['Жим в тренажёре под небольшим наклоном','Жим в тренажёре на грудь под наклоном'],
+      ['Разгибание руки из-за головы с канатом','Разгибание рук над головой с канатом'],
+      ['Ягодичный мост / хип-траст','Ягодичный мост / Hip Thrust']
+    ];
+    for(const [oldName,newName] of aliases) await c.query('UPDATE public.coach_training_program_template_exercises SET name=$2 WHERE name=$1',[oldName,newName]);
+    await c.query('COMMIT');
+  } catch(e) { await c.query('ROLLBACK'); throw e; }
+  finally { c.release(); }
+}
+
 // Stage 4 catalog baseline verified.
