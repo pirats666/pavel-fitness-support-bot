@@ -342,8 +342,27 @@ async function showProgramCatalogGroups(ctx:Context,id:number){
     .text('🟢 Для новичков','program:catalog-group:beginners:'+id).row()
     .text('🟡 Для среднего уровня','program:catalog-group:intermediate:'+id).row()
     .text('🔵 Акцент на мышечную группу','program:catalog-group:specialization:'+id).row()
+    .text('🔴 Упор на гипертрофию','program:catalog-group:hypertrophy:'+id).row()
     .text('⬅️ К программе','program:'+id);
   await render(ctx,'📚 <b>ТРЕНИРОВОЧНЫЕ ПРОГРАММЫ</b>\n\nВыберите группу:',kb);
+}
+
+async function showHypertrophyProgramCatalog(ctx:Context,id:number){
+  const templates=await listTrainingProgramTemplates();
+  const selected=templates.filter((t:any)=>String(t.goal??'').toLowerCase().includes('гипертроф'));
+  const kb=new InlineKeyboard();
+  for(const t of selected){
+    const order=Number((t as any).catalog_order);
+    let label=(t as any).catalog_display_name || t.name;
+    label=label.replace(/^БАЗОВАЯ ПРОГРАММА\s+/i,'').replace(/^Базовая программа\s+/i,'');
+    const prefix=Number.isFinite(order) ? order+'. ' : '';
+    kb.text(prefix+label,'program:template:'+t.id+':'+id).row();
+  }
+  kb.text('⬅️ К группам','program:templates:'+id);
+  const text=selected.length
+    ? '📚 <b>🔴 УПОР НА ГИПЕРТРОФИЮ</b>\n\nВыберите программу:'
+    : '📚 <b>🔴 УПОР НА ГИПЕРТРОФИЮ</b>\n\nПрограммы с таким приоритетом пока не добавлены.';
+  await render(ctx,text,kb);
 }
 
 async function showProgramCatalogGroup(ctx:Context,groupKey:string,id:number){
@@ -370,6 +389,9 @@ bot.callbackQuery(/^program:templates:(\d+)$/,async ctx=>{
 });
 bot.callbackQuery(/^program:catalog-group:(beginners|intermediate|specialization):(\d+)$/,async ctx=>{
   const group=ctx.match[1];const id=Number(ctx.match[2]);await ctx.answerCallbackQuery();await showProgramCatalogGroup(ctx,group,id);
+});
+bot.callbackQuery(/^program:catalog-group:hypertrophy:(\d+)$/,async ctx=>{
+  const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();await showHypertrophyProgramCatalog(ctx,id);
 });
 bot.callbackQuery(/^program:template:(\d+):(\d+)$/,async ctx=>{const tid=Number(ctx.match[1]),id=Number(ctx.match[2]);await ctx.answerCallbackQuery();const t=await getTrainingProgramTemplate(tid);if(!t)return;const days=await listTrainingProgramTemplateDays(tid);const exercisesByDay:Record<number,any[]>={};for(const d of days)exercisesByDay[d.id]=await listTrainingProgramTemplateExercises(d.id);const kb=new InlineKeyboard().text('📥 Загрузить клиенту','program:template-apply:'+tid+':'+id).row().text('⬅️ К базе программ','program:templates:'+id);await render(ctx,templateProgramText(t,days,exercisesByDay),kb);});
 bot.callbackQuery(/^program:template-apply:(\d+):(\d+)$/,async ctx=>{const tid=Number(ctx.match[1]),id=Number(ctx.match[2]);await ctx.answerCallbackQuery();const saved=await applyTrainingProgramTemplate(id,tid);await render(ctx,'✅ Базовая программа загружена в карточку клиента.\n\n'+programText(saved,await listTrainingProgramDays(id)),new InlineKeyboard().text('✏️ Скорректировать программу','program:edit:'+id).row().text('⬅️ К клиенту','client:view:'+id));});
