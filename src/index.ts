@@ -148,6 +148,8 @@ function editChoices(field:keyof ClientDraft) {
 }
 
 bot.use(async(ctx,next)=>{
+  const updateType=ctx.callbackQuery?'callback_query':ctx.message?'message':ctx.inlineQuery?'inline_query':ctx.update.my_chat_member?'my_chat_member':ctx.update.chat_member?'chat_member':'other';
+  console.log('[UPDATE]',{update_id:ctx.update.update_id,from_id:ctx.from?.id,type:updateType});
   if(!isAdmin(ctx)){ if(ctx.callbackQuery) await ctx.answerCallbackQuery({text:'Доступ запрещён.'}).catch(()=>{}); else if(ctx.message) await ctx.reply('Доступ запрещён.'); return; }
   await next();
 });
@@ -663,10 +665,34 @@ bot.on('message:text',async ctx=>{
   }
 });
 
-bot.catch(e=>console.error('Telegram bot error',e));
-void migrateStage1Schema().then(()=>migrateStage2AssessmentSchema()).then(()=>migrateStage3StrategySchema()).then(()=>migrateStage4ProgramSchema()).then(()=>migrateStage4TemplateSchema()).then(()=>migrateTrainingProgramCatalogOrderSchema()).then(()=>migrateHypertrophyProgramTemplate()).then(()=>migrateLatHypertrophyProgramTemplate()).then(()=>migrateNextBaseTemplateSchema()).then(()=>migrateFollowingBaseTemplateSchema()).then(()=>migrateUpperLowerSpecializationTemplateSchema()).then(()=>migrateFullBodyUpperLowerTemplateSchema()).then(()=>migrateCanonicalTrainingProgramLibrary()).then(()=>logDatabaseDiagnostics()).catch(e=>{console.error('[DB MIGRATION] Failed:',e);process.exit(1);});
+bot.catch(e=>console.error('[TELEGRAM HANDLER ERROR]',e));
 const server=createServer((req,res)=>{if(req.url==='/health'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));return;}res.writeHead(404);res.end();});
 server.listen(PORT,()=>console.log('HTTP health server listening on '+PORT));
 async function shutdown(signal:string){console.log('Received '+signal+', shutting down');await bot.stop();await closeDb();server.close();process.exit(0);}
 process.once('SIGINT',()=>void shutdown('SIGINT'));process.once('SIGTERM',()=>void shutdown('SIGTERM'));
-void bot.start({onStart:info=>console.log('Bot @'+info.username+' started')});
+async function startApp(){
+  try{
+    await bot.api.getMe();
+    await bot.api.deleteWebhook({drop_pending_updates:false});
+    await migrateStage1Schema();
+    await migrateStage2AssessmentSchema();
+    await migrateStage3StrategySchema();
+    await migrateStage4ProgramSchema();
+    await migrateStage4TemplateSchema();
+    await migrateTrainingProgramCatalogOrderSchema();
+    await migrateHypertrophyProgramTemplate();
+    await migrateLatHypertrophyProgramTemplate();
+    await migrateNextBaseTemplateSchema();
+    await migrateFollowingBaseTemplateSchema();
+    await migrateUpperLowerSpecializationTemplateSchema();
+    await migrateFullBodyUpperLowerTemplateSchema();
+    await migrateCanonicalTrainingProgramLibrary();
+    await logDatabaseDiagnostics();
+    console.log('[BOT STARTUP] Telegram API verified; starting long polling');
+    await bot.start({onStart:info=>console.log('Bot @'+info.username+' started')});
+  }catch(e){
+    console.error('[BOT STARTUP FAILED]',e);
+    process.exit(1);
+  }
+}
+void startApp();
