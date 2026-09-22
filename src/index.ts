@@ -43,9 +43,11 @@ function mainText() { return '👋 Добро пожаловать в рабоч
 
 async function render(ctx: Context, text: string, keyboard?: InlineKeyboard) {
   if (ctx.callbackQuery?.message) {
-    try { await ctx.editMessageText(text, { parse_mode:'HTML', reply_markup:keyboard }); return; } catch {}
+    try { await ctx.editMessageText(text, { parse_mode:'HTML', reply_markup:keyboard }); return; }
+    catch(e) { console.error('[RENDER EDIT FAILED]', { update_id:ctx.update.update_id, error:e instanceof Error ? e.message : String(e) }); }
   }
-  await ctx.reply(text, { parse_mode:'HTML', reply_markup:keyboard });
+  try { await ctx.reply(text, { parse_mode:'HTML', reply_markup:keyboard }); }
+  catch(e) { console.error('[RENDER REPLY FAILED]', { update_id:ctx.update.update_id, error:e instanceof Error ? e.message : String(e) }); throw e; }
 }
 
 async function showMain(ctx: Context) { await render(ctx, mainText(), MAIN_MENU); }
@@ -149,7 +151,7 @@ function editChoices(field:keyof ClientDraft) {
 
 bot.use(async(ctx,next)=>{
   const updateType=ctx.callbackQuery?'callback_query':ctx.message?'message':ctx.inlineQuery?'inline_query':ctx.update.my_chat_member?'my_chat_member':ctx.update.chat_member?'chat_member':'other';
-  console.log('[UPDATE]',{update_id:ctx.update.update_id,from_id:ctx.from?.id,type:updateType});
+  console.log('[UPDATE]',{update_id:ctx.update.update_id,from_id:ctx.from?.id,type:updateType,text:ctx.message?.text,callback_data:ctx.callbackQuery?.data});
   if(!isAdmin(ctx)){ if(ctx.callbackQuery) await ctx.answerCallbackQuery({text:'Доступ запрещён.'}).catch(()=>{}); else if(ctx.message) await ctx.reply('Доступ запрещён.'); return; }
   await next();
 });
