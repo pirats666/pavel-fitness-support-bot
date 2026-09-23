@@ -21,6 +21,8 @@ type ActiveLog = {
 
 const sessions = new Map<number, ActiveLog>();
 
+let schemaReady: Promise<void> | null = null;
+
 async function ensureSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.coach_workout_sessions (
@@ -264,23 +266,30 @@ async function showSession(ctx: Context, clientId: number, sessionId: number) {
 }
 
 export async function registerWorkoutResults(bot: Bot) {
-  await ensureSchema();
+  schemaReady = ensureSchema().catch(error => {
+    console.error('[WORKOUT RESULTS SCHEMA FAILED]', error);
+    throw error;
+  });
+  const ready = async () => {
+    if (!schemaReady) schemaReady = ensureSchema();
+    return schemaReady;
+  };
 
-  bot.command('workouts', async ctx => showClients(ctx));
-  bot.callbackQuery('wr:clients', async ctx => { await ctx.answerCallbackQuery(); await showClients(ctx); });
-  bot.callbackQuery(/^wr:client:(\d+)$/, async ctx => {
+  bot.command('workouts', async ctx => { await ready(); await showClients(ctx); });
+  bot.callbackQuery('wr:clients', async ctx => { await ctx.answerCallbackQuery(); await showClients(ctx); });\n    await ready();
+  bot.callbackQuery(/^wr:client:(\d+)$/, async ctx => {\n    await ready();
     await ctx.answerCallbackQuery();
     await showPrograms(ctx, Number(ctx.match[1]));
   });
-  bot.callbackQuery(/^wr:programs:(\d+)$/, async ctx => {
+  bot.callbackQuery(/^wr:programs:(\d+)$/, async ctx => {\n    await ready();
     await ctx.answerCallbackQuery();
     await showPrograms(ctx, Number(ctx.match[1]));
   });
-  bot.callbackQuery(/^wr:program:(\d+)$/, async ctx => {
+  bot.callbackQuery(/^wr:program:(\d+)$/, async ctx => {\n    await ready();
     await ctx.answerCallbackQuery();
     await showDays(ctx, Number(ctx.match[1]));
   });
-  bot.callbackQuery(/^wr:day:(\d+):(\d+)$/, async ctx => {
+  bot.callbackQuery(/^wr:day:(\d+):(\d+)$/, async ctx => {\n    await ready();
     const clientId = Number(ctx.match[1]);
     const dayId = Number(ctx.match[2]);
     await ctx.answerCallbackQuery();
@@ -292,7 +301,7 @@ export async function registerWorkoutResults(bot: Bot) {
     exercises.forEach((e:any, i:number) => lines.push((i+1) + '. ' + esc(e.name) + ' — ' + e.sets + ' × ' + esc(e.reps)));
     await render(ctx, lines.join('\n'), kb);
   });
-  bot.callbackQuery(/^wr:start:(\d+):(\d+)$/, async ctx => {
+  bot.callbackQuery(/^wr:start:(\d+):(\d+)$/, async ctx => {\n    await ready();
     const clientId = Number(ctx.match[1]);
     const dayId = Number(ctx.match[2]);
     await ctx.answerCallbackQuery();
@@ -304,11 +313,11 @@ export async function registerWorkoutResults(bot: Bot) {
       await render(ctx, '❌ Не удалось начать тренировку: ' + esc(e instanceof Error ? e.message : String(e)), new InlineKeyboard().text('⬅️ Назад', 'wr:days:' + clientId));
     }
   });
-  bot.callbackQuery(/^wr:session:(\d+):(\d+)$/, async ctx => {
+  bot.callbackQuery(/^wr:session:(\d+):(\d+)$/, async ctx => {\n    await ready();
     await ctx.answerCallbackQuery();
     await showSession(ctx, Number(ctx.match[1]), Number(ctx.match[2]));
   });
-  bot.callbackQuery(/^wr:set:(\d+):(\d+):(\d+)$/, async ctx => {
+  bot.callbackQuery(/^wr:set:(\d+):(\d+):(\d+)$/, async ctx => {\n    await ready();
     const clientId = Number(ctx.match[1]);
     const sessionId = Number(ctx.match[2]);
     const exerciseSessionId = Number(ctx.match[3]);
@@ -316,7 +325,7 @@ export async function registerWorkoutResults(bot: Bot) {
     sessions.set(ctx.from!.id, { clientId, sessionId, exerciseSessionId, step: 'weight' });
     await render(ctx, '➕ <b>Новый фактический подход</b>\n\nВведите рабочий вес в кг.\n\nДля упражнения с собственным весом можно ввести 0.', new InlineKeyboard().text('❌ Отмена', 'wr:session:' + clientId + ':' + sessionId));
   });
-  bot.callbackQuery(/^wr:finish:(\d+):(\d+)$/, async ctx => {
+  bot.callbackQuery(/^wr:finish:(\d+):(\d+)$/, async ctx => {\n    await ready();
     const clientId = Number(ctx.match[1]);
     const sessionId = Number(ctx.match[2]);
     await ctx.answerCallbackQuery();
@@ -325,7 +334,7 @@ export async function registerWorkoutResults(bot: Bot) {
       .text('⏭ Без комментария', 'wr:finish-none:' + clientId + ':' + sessionId).row()
       .text('❌ Отмена', 'wr:session:' + clientId + ':' + sessionId));
   });
-  bot.callbackQuery(/^wr:finish-none:(\d+):(\d+)$/, async ctx => {
+  bot.callbackQuery(/^wr:finish-none:(\d+):(\d+)$/, async ctx => {\n    await ready();
     const clientId = Number(ctx.match[1]);
     const sessionId = Number(ctx.match[2]);
     await ctx.answerCallbackQuery();
@@ -336,7 +345,7 @@ export async function registerWorkoutResults(bot: Bot) {
       .text('🏋️ Новая тренировка', 'wr:client:' + clientId).row()
       .text('🏠 Главное меню', 'main'));
   });
-  bot.callbackQuery(/^wr:history:(\d+)$/, async ctx => {
+  bot.callbackQuery(/^wr:history:(\d+)$/, async ctx => {\n    await ready();
     await ctx.answerCallbackQuery();
     const rows = await history(Number(ctx.match[1]));
     const lines = ['📚 <b>ИСТОРИЯ ТРЕНИРОВОК</b>', ''];
