@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { Bot, InlineKeyboard, type Context } from 'grammy';
 import { closeDb, createClient, deleteClient, getClient, listClients, updateClientField, logDatabaseDiagnostics, migrateStage1Schema, migrateStage2AssessmentSchema, migrateStage3StrategySchema, getPrimaryAssessment, upsertPrimaryAssessment, getTrainingStrategy, upsertTrainingStrategy, migrateStage4ProgramSchema, migrateStage4TemplateSchema, migrateTrainingProgramCatalogOrderSchema, migrateHypertrophyProgramTemplate, migrateLatHypertrophyProgramTemplate, migrateCanonicalTrainingProgramLibrary, getTrainingProgram, deleteTrainingProgram, listTrainingProgramTemplates, getTrainingProgramTemplate, listTrainingProgramTemplateDays, listTrainingProgramTemplateExercises, applyTrainingProgramTemplate, updateTrainingProgramExercise, updateTrainingProgramName, listProgramCatalogMuscles, listProgramCatalogExercises, replaceTrainingProgramExercise, upsertTrainingProgram, listTrainingProgramDays, getTrainingProgramDay, createTrainingProgramDay, listTrainingProgramExercises, createTrainingProgramExercise, getTrainingProgramExercise, deleteTrainingProgramExercise } from './db.js';
 import type { Client, ClientDraft, AddSession, PrimaryAssessment, TrainingStrategy, TrainingProgram, TrainingProgramDay, TrainingProgramExercise } from './types.js';
+import { registerWorkoutResults } from './workout-results.js';
 import { migrateNextBaseTemplateSchema, migrateFollowingBaseTemplateSchema, migrateUpperLowerSpecializationTemplateSchema, migrateFullBodyUpperLowerTemplateSchema } from './stage4-next-template.js';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -689,6 +690,7 @@ async function startApp(){
     await migrateUpperLowerSpecializationTemplateSchema();
     await migrateFullBodyUpperLowerTemplateSchema();
     await migrateCanonicalTrainingProgramLibrary();
+    await registerWorkoutResults(bot);
     await logDatabaseDiagnostics();
     console.log('[BOT STARTUP] Telegram API verified; starting long polling');
     await bot.start({onStart:info=>console.log('Bot @'+info.username+' started')});
