@@ -15,7 +15,7 @@ type ActiveLog = {
   sessionId: number;
   exerciseSessionId?: number;
   exerciseId?: number;
-  step?: 'weight' | 'reps' | 'rir' | 'comment';
+  step?: 'weight' | 'reps' | 'rir' | 'comment' | 'finish-comment';
   pending?: { weightKg: number; reps: number; rir: number | null };
 };
 
@@ -238,6 +238,7 @@ async function showDays(ctx: Context, clientId: number) {
   const days = await dbDays(clientId);
   const kb = new InlineKeyboard();
   for (const d of days) kb.text('🏋️ День ' + d.day_number + ' — ' + d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,''), 'wr:day:' + clientId + ':' + d.id).row();
+  kb.text('📚 История тренировок', 'wr:history:' + clientId).row();
   kb.text('⬅️ К программам', 'wr:programs:' + clientId);
   await render(ctx, days.length ? '📅 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>\n\nВыберите день:' : '📅 Дни программы не созданы.', kb);
 }
@@ -319,7 +320,7 @@ export async function registerWorkoutResults(bot: Bot) {
     const clientId = Number(ctx.match[1]);
     const sessionId = Number(ctx.match[2]);
     await ctx.answerCallbackQuery();
-    sessions.set(ctx.from!.id, { clientId, sessionId });
+    sessions.set(ctx.from!.id, { clientId, sessionId, step: 'finish-comment' });
     await render(ctx, '📝 <b>Завершение тренировки</b>\n\nВведите общий комментарий тренера или нажмите «Без комментария».', new InlineKeyboard()
       .text('⏭ Без комментария', 'wr:finish-none:' + clientId + ':' + sessionId).row()
       .text('❌ Отмена', 'wr:session:' + clientId + ':' + sessionId));
@@ -347,8 +348,19 @@ export async function registerWorkoutResults(bot: Bot) {
   });
   bot.on('message:text', async ctx => {
     const s = sessions.get(ctx.from!.id);
-    if (!s?.step || !s.exerciseSessionId) return;
+    if (!s?.step) return;
     const t = ctx.message.text.trim();
+    if (s.step === 'finish-comment') {
+      if (t.startsWith('/')) return;
+      const done = await finishSession(s.sessionId, t.toLowerCase() === 'нет' ? null : t);
+      sessions.delete(ctx.from!.id);
+      if (!done) return ctx.reply('❌ Тренировка уже завершена или не найдена.');
+      return render(ctx, '✅ <b>Тренировка сохранена</b>\\n\\nФактические результаты записаны.', new InlineKeyboard()
+        .text('📚 История тренировок', 'wr:history:' + s.clientId).row()
+        .text('🏋️ Новая тренировка', 'wr:client:' + s.clientId).row()
+        .text('🏠 Главное меню', 'main'));
+    }
+    if (!s.exerciseSessionId) return;
     if (t.startsWith('/')) return;
     if (s.step === 'weight') {
       const n = Number(t.replace(',', '.'));
