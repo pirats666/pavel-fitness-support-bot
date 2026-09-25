@@ -36,7 +36,10 @@ const EXPERIENCES = [['🟢 Новичок','exp:beginner'],['🟡 Средни�
 const FREQUENCIES = [['2','freq:2'],['3','freq:3'],['4','freq:4'],['5+','freq:5']] as const;
 const LOCATIONS = [['🏠 Дом','loc:home'],['🏋️ Зал','loc:gym'],['🌳 Спортплощадка','loc:outdoor'],['🔄 Комбинированный вариант','loc:mixed']] as const;
 
-const MAIN_MENU = new InlineKeyboard()\n  .text('👤 Клиенты','clients').row()\n  .text('🏋️ Выполнение тренировок','workouts').row()\n  .text('📝 Заметки','notes');
+const MAIN_MENU = new InlineKeyboard()
+  .text('👤 Клиенты','clients').row()
+  .text('🏋️ Выполнение тренировок','workouts').row()
+  .text('📝 Заметки','notes');
 
 function isAdmin(ctx: Context) { return ctx.from?.id === ADMIN_ID; }
 function esc(v: unknown) { return String(v ?? '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]!)); }
@@ -160,7 +163,8 @@ bot.use(async(ctx,next)=>{
 bot.command('start',async ctx=>{ addSessions.delete(ctx.from!.id); editSessions.delete(ctx.from!.id); await showMain(ctx); });
 bot.callbackQuery('main',async ctx=>{await ctx.answerCallbackQuery();addSessions.delete(ctx.from!.id);editSessions.delete(ctx.from!.id);await showMain(ctx);});
 bot.callbackQuery('notes',async ctx=>{await ctx.answerCallbackQuery();await render(ctx,'Этот раздел будет доступен на следующем этапе.',new InlineKeyboard().text('🏠 Главное меню','main'));});
-bot.callbackQuery('clients',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});\nbot.callbackQuery('workouts',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});
+bot.callbackQuery('clients',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});
+bot.callbackQuery('workouts',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});
 bot.callbackQuery('client:add',async ctx=>{await ctx.answerCallbackQuery();addSessions.set(ctx.from.id,{step:'telegram_username',draft:{telegram_user_id:null, telegram_username:null, telegram_first_name:null, telegram_last_name:null, name:'Клиент'}});await promptAdd(ctx,addSessions.get(ctx.from.id)!);});
 bot.callbackQuery('telegram:skip',async ctx=>{const s=addSessions.get(ctx.from.id);if(!s||s.step!=='telegram_username')return;await ctx.answerCallbackQuery();s.draft.telegram_username=null;s.step='age';await promptAdd(ctx,s);});
 bot.callbackQuery('client:add-cancel',async ctx=>{await ctx.answerCallbackQuery();addSessions.delete(ctx.from.id);await showClients(ctx);});
@@ -518,185 +522,3 @@ bot.callbackQuery(/^program:day:new:(\d+)$/,async ctx=>{
 });
 bot.callbackQuery(/^program:days:(\d+)$/,async ctx=>{
   const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();
-  const days=await listTrainingProgramDays(id);
-  const kb=new InlineKeyboard();
-  for(const d of days)kb.text('🏋️ День '+d.day_number+' — '+d.name.replace(/^День\s*\d+\s*[—-]?\s*/i,''),'program:day:'+d.id).row();
-  kb.text('⬅️ К программе','program:'+id);
-  await render(ctx,days.length?'📋 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>\n\nВыберите день:':'📋 <b>ТРЕНИРОВОЧНЫЕ ДНИ</b>\n\nДни пока не созданы.',kb);
-});
-bot.callbackQuery(/^program:day:(\d+)$/,async ctx=>{
-  const dayId=Number(ctx.match[1]);await ctx.answerCallbackQuery();
-  const d=await getTrainingProgramDay(dayId);if(!d)return;
-  const ex=await listTrainingProgramExercises(dayId);
-  const lines=[dayTitle(d),''];
-  ex.forEach((e,i)=>lines.push((i+1)+'. <b>'+esc(e.name)+'</b>'+(e.muscle_group?' — '+esc(e.muscle_group):'')+'\n   '+e.sets+' × '+esc(e.reps)+(e.rest_seconds!==null?' · отдых '+e.rest_seconds+' сек.':'')+(e.rir!==null?' · RIR '+e.rir:'')+(e.comment&&!/^Отдых:/i.test(e.comment)?'\n   📝 '+esc(e.comment):'')));
-  const kb=new InlineKeyboard()
-    .text('✏️ Скорректировать день','program:edit-day:'+dayId).row()
-    .text('⬅️ К тренировочным дням','program:days:'+d.client_id).row()
-    .text('⬅️ К программе','program:'+d.client_id);
-  await render(ctx,lines.join('\n'),kb);
-});
-bot.callbackQuery(/^program:edit-day:(\d+)$/,async ctx=>{
-  const dayId=Number(ctx.match[1]);await ctx.answerCallbackQuery();
-  const d=await getTrainingProgramDay(dayId);if(!d)return;
-  const ex=await listTrainingProgramExercises(dayId);
-  const kb=new InlineKeyboard();
-  for(const e of ex)kb.text('🏋️ '+e.name,'program:edit-ex:'+e.id).row();
-  kb.text('➕ Добавить упражнение','program:exercise:new:'+dayId).row();
-  kb.text('⬅️ К дню','program:day:'+dayId).row().text('⬅️ К программе','program:'+d.client_id);
-  await render(ctx,dayTitle(d)+'\n\n✏️ <b>Корректировка дня</b>\n\nВыберите упражнение:',kb);
-});
-bot.callbackQuery(/^program:exercise:new:(\d+)$/,async ctx=>{
-  const dayId=Number(ctx.match[1]);await ctx.answerCallbackQuery();
-  const d=await getTrainingProgramDay(dayId);if(!d)return;
-  programSessions.set(ctx.from!.id,{clientId:d.client_id,kind:'exercise',step:'name',dayId,exercise:{day_id:dayId}});
-  await render(ctx,'➕ <b>Упражнение</b>\n\nВведите название упражнения:',new InlineKeyboard().text('❌ Отмена','program:day:'+dayId));
-});
-bot.callbackQuery(/^strategy:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();await showStrategy(ctx,id);});
-bot.callbackQuery(/^strategy:(?:new|edit):(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();try{await loadStrategySession(ctx,id);await render(ctx,'🎯 <b>Стратегия тренировок</b>\n\nВыберите раздел для заполнения или изменения.',strategyMenu(id));}catch(e){console.error('[STRATEGY OPEN FAILED]',e);await render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));}});
-bot.callbackQuery(/^strategy:field:(\d+):(main_task|priorities|what_to_account_for|main_focus|trainer_decision)$/,async ctx=>{const id=Number(ctx.match[1]);const field=ctx.match[2] as StrategyField;await ctx.answerCallbackQuery();const s=await loadStrategySession(ctx,id);s.awaitingText=field;const labels:Record<StrategyField,string>={main_task:'🎯 Основная задача',priorities:'⭐ Приоритеты',what_to_account_for:'⚠️ Что учитывать',main_focus:'🔎 Основной фокус',trainer_decision:'📝 Решение / комментарий тренера'};await render(ctx,labels[field]+'\n\nВведите текст или нажмите «Пропустить».',new InlineKeyboard().text('⏭ Пропустить','strategy:skip:'+id+':'+field).row().text('⬅️ Назад к стратегии','strategy:menu:'+id));});
-bot.callbackQuery(/^strategy:skip:(\d+):(main_task|priorities|what_to_account_for|main_focus|trainer_decision)$/,async ctx=>{const id=Number(ctx.match[1]);const field=ctx.match[2] as StrategyField;await ctx.answerCallbackQuery();const s=await loadStrategySession(ctx,id);s.draft[field]=null;s.awaitingText=undefined;await render(ctx,strategyText(s.draft),strategyMenu(id));});
-bot.callbackQuery(/^strategy:menu:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();const s=await loadStrategySession(ctx,id);s.awaitingText=undefined;await render(ctx,strategyText(s.draft),strategyMenu(id));});
-bot.callbackQuery(/^strategy:save:(\d+)$/,async ctx=>{const id=Number(ctx.match[1]);await ctx.answerCallbackQuery();const s=await loadStrategySession(ctx,id);try{const saved=await upsertTrainingStrategy(s.draft);strategySessions.delete(ctx.from!.id);await render(ctx,strategyText(saved),new InlineKeyboard().text('✏️ Изменить','strategy:edit:'+id).row().text('⬅️ Назад к клиенту','client:view:'+id));}catch(e){console.error('[STRATEGY SAVE FAILED]',e);await render(ctx,'❌ Не удалось сохранить стратегию.',strategyMenu(id));}});
-bot.callbackQuery(/client:view:(\d+)/,async ctx=>{const callbackData=ctx.callbackQuery.data;const parsedClientId=Number(ctx.match[1]);console.info('[CLIENT BUTTON CLICK] callback_data=%s parsed_client_id=%s',callbackData,parsedClientId);await ctx.answerCallbackQuery();console.info('[CLIENT SELECT] client_id=%s',parsedClientId);const client=await getClient(parsedClientId);if(!client){console.warn('[CLIENT NOT FOUND] client_id=%s',parsedClientId);await render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));return;}console.info('[CLIENT FOUND] client_id=%s',client.id);await render(ctx,clientCard(client),clientActions(client.id));});
-bot.callbackQuery(/client:edit:(\d+)/,async ctx=>{const callbackData=ctx.callbackQuery.data;const id=Number(ctx.match[1]);console.info('[EDIT CLIENT CLICK] callback_data=%s client_id=%s',callbackData,id);await ctx.answerCallbackQuery();const client=await getClient(id);if(!client){console.warn('[EDIT CLIENT NOT FOUND] client_id=%s',id);await render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));return;}console.info('[EDIT CLIENT FOUND] client_id=%s',client.id);await render(ctx,'✏️ <b>Что изменить?</b>',editMenu(client.id));});
-bot.callbackQuery(/client:delete:(\d+)/,async ctx=>{const callbackData=ctx.callbackQuery.data;const id=Number(ctx.match[1]);console.info('[DELETE CLIENT CLICK] callback_data=%s client_id=%s',callbackData,id);await ctx.answerCallbackQuery();const client=await getClient(id);if(!client){console.warn('[DELETE CLIENT NOT FOUND] client_id=%s',id);await render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));return;}console.info('[DELETE CLIENT FOUND] client_id=%s',client.id);await render(ctx,'⚠️ <b>Удалить клиента?</b>\n\n📱 Telegram: '+telegramLabel(client.telegram_username)+'\n\nЭто действие нельзя отменить.',new InlineKeyboard().text('🗑 Да, удалить','client:delete-confirm:'+client.id).row().text('⬅️ Отмена','client:view:'+client.id));});
-bot.callbackQuery(/client:delete-confirm:(\d+)/,async ctx=>{const callbackData=ctx.callbackQuery.data;const id=Number(ctx.match[1]);console.info('[CONFIRM DELETE CLIENT CLICK] callback_data=%s client_id=%s',callbackData,id);await ctx.answerCallbackQuery();const client=await getClient(id);if(!client){console.warn('[DELETE CONFIRM NOT FOUND] client_id=%s',id);await render(ctx,'❌ Клиент не найден.',new InlineKeyboard().text('⬅️ К клиентам','clients'));return;}const ok=await deleteClient(id);console.info('[CLIENT DELETE RESULT] client_id=%s deleted=%s',id,ok);if(ok)await render(ctx,'✅ Клиент удалён.',new InlineKeyboard().text('⬅️ К клиентам','clients'));else await render(ctx,'❌ Не удалось удалить клиента.',new InlineKeyboard().text('⬅️ К клиентам','clients'));});
-
-const editPrompts:Partial<Record<keyof ClientDraft,string>>={
-  telegram_username:'Введите Telegram username клиента или нажмите «Пропустить»:',
-  age:'Введите возраст клиента:',height_cm:'Введите рост клиента в см:',weight_kg:'Введите текущий вес клиента в кг:',
-  goal:'Выберите основную цель клиента:',experience:'Выберите тренировочный опыт:',workouts_per_week:'Сколько тренировок в неделю планируется?',
-  training_location:'Где клиент будет тренироваться?',limitations:'Введите ограничения текстом:',note:'Введите дополнительную заметку:'
-};
-bot.callbackQuery(/editfield:(\d+):(.+)/,async ctx=>{const id=Number(ctx.match[1]);const field=ctx.match[2] as keyof ClientDraft;const allowed=Object.keys(editPrompts);if(!allowed.includes(field) || !editPrompts[field])return;await ctx.answerCallbackQuery();editSessions.set(ctx.from.id,{clientId:id,field});await render(ctx,editPrompts[field]!,editChoices(field));});
-bot.callbackQuery('edittelegram:skip',async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='telegram_username')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'telegram_username',null);editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
-bot.callbackQuery('editcancel',async ctx=>{await ctx.answerCallbackQuery();const s=editSessions.get(ctx.from.id);editSessions.delete(ctx.from.id);if(s)await showClient(ctx,s.clientId);});
-for(const [label,data] of GOALS) bot.callbackQuery('edit:'+data,async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='goal')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'goal',label);editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
-for(const [label,data] of EXPERIENCES) bot.callbackQuery('edit:'+data,async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='experience')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'experience',label);editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
-for(const [label,data] of FREQUENCIES) bot.callbackQuery('edit:'+data,async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='workouts_per_week')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'workouts_per_week',Number(data.slice(5)));editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
-for(const [label,data] of LOCATIONS) bot.callbackQuery('edit:'+data,async ctx=>{const s=editSessions.get(ctx.from.id);if(!s||s.field!=='training_location')return;await ctx.answerCallbackQuery();const c=await updateClientField(s.clientId,'training_location',label);editSessions.delete(ctx.from.id);if(c)await showClient(ctx,c.id);});
-
-bot.on('message:text',async ctx=>{
-  const uid=ctx.from.id,t=ctx.message.text.trim();
-  if(t.startsWith('/'))return;
-  const add=addSessions.get(uid);
-  if(add) console.info('[FSM] incoming state=%s input=%j',add.step,t);
-  if(add){
-    if(add.step==='telegram_username'){
-      if(!t)return ctx.reply('Введите username или нажмите «Пропустить».');
-      const username=t.replace(/^@/,'').trim();
-      if(!/^[A-Za-z0-9_]{5,32}$/.test(username)) return ctx.reply('Введите корректный Telegram username или нажмите «Пропустить».');
-      add.draft.telegram_username=username; add.draft.telegram_user_id=null; add.draft.telegram_first_name=null; add.draft.telegram_last_name=null; add.draft.name='@'+username; add.step='age';
-      return promptAdd(ctx,add);
-    }
-    if(add.step==='age'){
-      console.info('[FSM] state=AGE input=%j handler=AGE',t);
-      const n=Number(t);
-      if(!/^\d+$/.test(t)||!Number.isInteger(n)||n<10||n>100){console.info('[FSM] state=AGE rejected next=AGE');return ctx.reply(n>=1&&n<=120?'Введите корректный возраст.':'Введите возраст числом.');}
-      add.draft.age=n; add.step='height';
-      console.info('[FSM] state=AGE accepted age=%d next=HEIGHT',n);
-      return promptAdd(ctx,add);
-    }
-    if(add.step==='height'){console.info('[FSM] state=HEIGHT input=%j handler=HEIGHT',t);const n=positiveNumber(t);if(n===null||n>300){console.info('[FSM] state=HEIGHT rejected next=HEIGHT');return ctx.reply('Введите рост числом.');}add.draft.height_cm=n;add.step='weight';console.info('[FSM] state=HEIGHT accepted next=WEIGHT');return promptAdd(ctx,add);}
-    if(add.step==='weight'){console.info('[FSM] state=WEIGHT input=%j handler=WEIGHT',t);const n=positiveNumber(t);if(n===null||n>500){console.info('[FSM] state=WEIGHT rejected next=WEIGHT');return ctx.reply('Введите вес числом.');}add.draft.weight_kg=n;add.step='goal';console.info('[FSM] state=WEIGHT accepted next=GOAL');return promptAdd(ctx,add);}
-    if(add.step==='custom_goal'){if(!t)return ctx.reply('Введите цель текстом.');add.draft.goal=t;add.step='experience';return promptAdd(ctx,add);}
-    if(add.step==='limitations_text'){if(!t)return ctx.reply('Введите ограничения текстом.');add.draft.limitations=t;add.step='note';return promptAdd(ctx,add);}
-    if(add.step==='note'){add.draft.note=t||'Нет';if(complete(add.draft))return render(ctx,summary(add.draft),confirmKb());}
-  }
-  const assessment=assessmentSessions.get(uid);
-  if(assessment?.awaitingText){
-    if(!t)return ctx.reply('Введите текст или нажмите «Пропустить».');
-    (assessment.draft as any)[assessment.awaitingText]=t;
-    assessment.awaitingText=undefined;
-    return render(ctx,assessmentText(assessment.draft),assessmentMenu(assessment.clientId));
-  }
-
-  const programSession=programSessions.get(uid);
-  if(programSession?.kind==='program-edit'&&programSession.step==='edit-name'&&programSession.program){
-    if(!t)return ctx.reply('Введите название программы.');
-    programSession.program.name=t;
-    programSession.step='edit-menu';
-    return showProgramEditor(ctx,programSession.clientId);
-  }
-  if(programSession){
-    const s=programSession;
-    if(!t)return ctx.reply('Введите значение текстом.');
-    if(s.kind==='program'&&s.program){
-      if(s.step==='name'){s.program.name=t;s.step='goal';return render(ctx,'Введите цель программы:',new InlineKeyboard().text('⏭ Пропустить','program:skipgoal:'+s.clientId).row().text('❌ Отмена','program:cancel:'+s.clientId));}
-      if(s.step==='goal'){s.program.goal=t==='Нет'?null:t;s.step='duration';return render(ctx,'Введите срок программы в неделях:',new InlineKeyboard().text('⏭ Пропустить','program:skipduration:'+s.clientId).row().text('❌ Отмена','program:cancel:'+s.clientId));}
-      if(s.step==='duration'){const n=Number(t.trim());if(!Number.isInteger(n)||n<1||n>104)return ctx.reply('❌ Введите целое число от 1 до 104.');s.program.duration_weeks=n;s.step='comment';return render(ctx,'Введите комментарий или «Нет».',new InlineKeyboard().text('💾 Сохранить','program:save:'+s.clientId).row().text('❌ Отмена','program:cancel:'+s.clientId));}
-      if(s.step==='comment'){s.program.comment=t==='Нет'?null:t;return render(ctx,'🏋️ <b>Проверьте программу</b>\n\n'+programText(s.program,[]),new InlineKeyboard().text('💾 Сохранить','program:save:'+s.clientId).row().text('❌ Отмена','program:cancel:'+s.clientId));}
-    }
-    if(s.kind==='day'&&s.step==='name'){const d=await createTrainingProgramDay(s.clientId,t);programSessions.delete(uid);return render(ctx,'✅ День добавлен.\n\n🏋️ '+esc(d.name),new InlineKeyboard().text('➕ Добавить упражнение','program:exercise:new:'+d.id).row().text('⬅️ К программе','program:'+s.clientId));}
-    if(s.kind==='exercise-edit'&&s.exercise&&s.exerciseId){
-      if(s.step==='name'){s.exercise.name=t;s.step='muscle';return ctx.reply('Введите мышечную группу:');}
-      if(s.step==='muscle'){s.exercise.muscle_group=t==='Нет'?null:t;s.step='sets';return ctx.reply('Введите количество подходов:');}
-      if(s.step==='sets'){const n=Number(t.trim());if(!Number.isInteger(n)||n<1||n>20)return ctx.reply('❌ Введите количество подходов целым числом от 1 до 20.');s.exercise.sets=n;s.step='reps';return ctx.reply('Введите количество повторений (например, 8-10):');}
-      if(s.step==='reps'){s.exercise.reps=t;s.step='rest';return ctx.reply('Введите отдых в секундах или «Нет»:');}
-      if(s.step==='rest'){if(t==='Нет')s.exercise.rest_seconds=null;else{const n=Number(t.trim());if(!Number.isInteger(n)||n<0||n>900)return ctx.reply('❌ Введите отдых целым числом от 0 до 900 секунд или «Нет».');s.exercise.rest_seconds=n;}s.step='rir';return ctx.reply('Введите RIR от 0 до 5 или «Нет»:');}
-      if(s.step==='rir'){if(t==='Нет')s.exercise.rir=null;else{const n=Number(t.trim());if(!Number.isFinite(n)||n<0||n>5)return ctx.reply('❌ Введите RIR от 0 до 5 или «Нет».');s.exercise.rir=n;}s.step='comment';return ctx.reply('Введите комментарий или «Нет»:');}
-      if(s.step==='comment'){s.exercise.comment=t==='Нет'?null:t;const ex=await updateTrainingProgramExercise({id:s.exerciseId,name:String(s.exercise.name),muscle_group:s.exercise.muscle_group??null,sets:Number(s.exercise.sets),reps:String(s.exercise.reps),rest_seconds:s.exercise.rest_seconds??null,rir:s.exercise.rir??null,comment:s.exercise.comment??null});programSessions.delete(uid);if(!ex)return ctx.reply('❌ Не удалось сохранить упражнение.');return render(ctx,'✅ Упражнение скорректировано и сохранено.',new InlineKeyboard().text('⬅️ К тренировке','program:day:'+ex.day_id));}
-    }
-    if(s.kind==='exercise'&&s.exercise){
-      if(s.step==='name'){s.exercise.name=t;s.step='muscle';return ctx.reply('Введите мышечную группу:');}
-      if(s.step==='muscle'){s.exercise.muscle_group=t==='Нет'?null:t;s.step='sets';return ctx.reply('Введите количество подходов:');}
-      if(s.step==='sets'){const n=Number(t.trim());if(!Number.isInteger(n)||n<1||n>20)return ctx.reply('❌ Введите количество подходов целым числом от 1 до 20.');s.exercise.sets=n;s.step='reps';return ctx.reply('Введите количество повторений (например, 8-10):');}
-      if(s.step==='reps'){s.exercise.reps=t;s.step='rest';return ctx.reply('Введите отдых в секундах или «Нет»:');}
-      if(s.step==='rest'){if(t==='Нет')s.exercise.rest_seconds=null;else{const n=Number(t.trim());if(!Number.isInteger(n)||n<0||n>900)return ctx.reply('❌ Введите отдых целым числом от 0 до 900 секунд или «Нет».');s.exercise.rest_seconds=n;}s.step='rir';return ctx.reply('Введите RIR от 0 до 5 или «Нет»:');}
-      if(s.step==='rir'){if(t==='Нет')s.exercise.rir=null;else{const n=Number(t.trim());if(!Number.isFinite(n)||n<0||n>5)return ctx.reply('❌ Введите RIR от 0 до 5 или «Нет».');s.exercise.rir=n;}s.step='comment';return ctx.reply('Введите комментарий или «Нет»:');}
-      if(s.step==='comment'){s.exercise.comment=t==='Нет'?null:t;const ex=await createTrainingProgramExercise(s.exercise as Omit<TrainingProgramExercise,'id'|'created_at'|'exercise_order'>);programSessions.delete(uid);return render(ctx,'✅ Упражнение добавлено.\n\n'+esc(ex.name),new InlineKeyboard().text('➕ Добавить ещё','program:exercise:new:'+ex.day_id).row().text('⬅️ К тренировке','program:day:'+ex.day_id));}
-    }
-  }
-  const strategy=strategySessions.get(uid);
-  if(strategy?.awaitingText){
-    if(!t)return ctx.reply('Введите текст или нажмите «Пропустить».');
-    (strategy.draft as any)[strategy.awaitingText]=t;
-    strategy.awaitingText=undefined;
-    return render(ctx,strategyText(strategy.draft),strategyMenu(strategy.clientId));
-  }
-  const edit=editSessions.get(uid);
-  if(edit){
-    try{
-      let value:string|number=t;
-      if(edit.field==='age'){const n=Number(t);if(!/^\d+$/.test(t)||!Number.isInteger(n)||n<1||n>120)return ctx.reply('Введите возраст числом.');value=n;}
-      if(edit.field==='height_cm'){const n=positiveNumber(t);if(n===null||n>300)return ctx.reply('Введите рост числом.');value=n;}
-      if(edit.field==='weight_kg'){const n=positiveNumber(t);if(n===null||n>500)return ctx.reply('Введите вес числом.');value=n;}
-      if(edit.field==='telegram_username'){if(!/^[A-Za-z0-9_]{5,32}$/.test(t.replace(/^@/,'')))return ctx.reply('Введите корректный Telegram username или нажмите «Пропустить».');value=t.replace(/^@/,'');}
-      const c=await updateClientField(edit.clientId,edit.field,value);editSessions.delete(uid);if(c)await showClient(ctx,c.id);
-    }catch(e){console.error(e);await ctx.reply('Не удалось сохранить изменение.');}
-  }
-});
-
-bot.catch(e=>console.error('[TELEGRAM HANDLER ERROR]',e));
-const server=createServer((req,res)=>{if(req.url==='/health'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));return;}res.writeHead(404);res.end();});
-server.listen(PORT,()=>console.log('HTTP health server listening on '+PORT));
-async function shutdown(signal:string){console.log('Received '+signal+', shutting down');await bot.stop();await closeDb();server.close();process.exit(0);}
-process.once('SIGINT',()=>void shutdown('SIGINT'));process.once('SIGTERM',()=>void shutdown('SIGTERM'));
-async function startApp(){
-  try{
-    await bot.api.getMe();
-    await bot.api.deleteWebhook({drop_pending_updates:false});
-    await migrateStage1Schema();
-    await migrateStage2AssessmentSchema();
-    await migrateStage3StrategySchema();
-    await migrateStage4ProgramSchema();
-    await migrateStage4TemplateSchema();
-    await migrateTrainingProgramCatalogOrderSchema();
-    await migrateHypertrophyProgramTemplate();
-    await migrateLatHypertrophyProgramTemplate();
-    await migrateNextBaseTemplateSchema();
-    await migrateFollowingBaseTemplateSchema();
-    await migrateUpperLowerSpecializationTemplateSchema();
-    await migrateFullBodyUpperLowerTemplateSchema();
-    await migrateCanonicalTrainingProgramLibrary();
-    await registerWorkoutResults(bot);
-    await logDatabaseDiagnostics();
-    console.log('[BOT STARTUP] Telegram API verified; starting long polling');
-    await bot.start({onStart:info=>console.log('Bot @'+info.username+' started')});
-  }catch(e){
-    console.error('[BOT STARTUP FAILED]',e);
-    process.exit(1);
-  }
-}
-void startApp();
