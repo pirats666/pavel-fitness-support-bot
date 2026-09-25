@@ -36,7 +36,10 @@ const EXPERIENCES = [['🟢 Новичок','exp:beginner'],['🟡 Средни�
 const FREQUENCIES = [['2','freq:2'],['3','freq:3'],['4','freq:4'],['5+','freq:5']] as const;
 const LOCATIONS = [['🏠 Дом','loc:home'],['🏋️ Зал','loc:gym'],['🌳 Спортплощадка','loc:outdoor'],['🔄 Комбинированный вариант','loc:mixed']] as const;
 
-const MAIN_MENU = new InlineKeyboard()\n  .text('👤 Клиенты','clients').row()\n  .text('🏋️ Выполнение тренировок','workouts').row()\n  .text('📝 Заметки','notes');
+const MAIN_MENU = new InlineKeyboard()
+  .text('👤 Клиенты','clients').row()
+  .text('🏋️ Выполнение тренировок','workouts').row()
+  .text('📝 Заметки','notes');
 
 function isAdmin(ctx: Context) { return ctx.from?.id === ADMIN_ID; }
 function esc(v: unknown) { return String(v ?? '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]!)); }
@@ -160,7 +163,8 @@ bot.use(async(ctx,next)=>{
 bot.command('start',async ctx=>{ addSessions.delete(ctx.from!.id); editSessions.delete(ctx.from!.id); await showMain(ctx); });
 bot.callbackQuery('main',async ctx=>{await ctx.answerCallbackQuery();addSessions.delete(ctx.from!.id);editSessions.delete(ctx.from!.id);await showMain(ctx);});
 bot.callbackQuery('notes',async ctx=>{await ctx.answerCallbackQuery();await render(ctx,'Этот раздел будет доступен на следующем этапе.',new InlineKeyboard().text('🏠 Главное меню','main'));});
-bot.callbackQuery('clients',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});\nbot.callbackQuery('workouts',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});
+bot.callbackQuery('clients',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});
+bot.callbackQuery('workouts',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});
 bot.callbackQuery('client:add',async ctx=>{await ctx.answerCallbackQuery();addSessions.set(ctx.from.id,{step:'telegram_username',draft:{telegram_user_id:null, telegram_username:null, telegram_first_name:null, telegram_last_name:null, name:'Клиент'}});await promptAdd(ctx,addSessions.get(ctx.from.id)!);});
 bot.callbackQuery('telegram:skip',async ctx=>{const s=addSessions.get(ctx.from.id);if(!s||s.step!=='telegram_username')return;await ctx.answerCallbackQuery();s.draft.telegram_username=null;s.step='age';await promptAdd(ctx,s);});
 bot.callbackQuery('client:add-cancel',async ctx=>{await ctx.answerCallbackQuery();addSessions.delete(ctx.from.id);await showClients(ctx);});
