@@ -38,7 +38,6 @@ const LOCATIONS = [['🏠 Дом','loc:home'],['🏋️ Зал','loc:gym'],['�
 
 const MAIN_MENU = new InlineKeyboard()
   .text('👤 Клиенты','clients').row()
-  .text('🏋️ Выполнение тренировок','workouts').row()
   .text('📝 Заметки','notes');
 
 function isAdmin(ctx: Context) { return ctx.from?.id === ADMIN_ID; }
@@ -86,9 +85,15 @@ function clientCard(c:Client) {
   ].join('\n');
 }
 function clientActions(id:number) {
-  return new InlineKeyboard().text('🧩 Первичная оценка','assessment:'+id).row().text('🎯 Стратегия тренировок','strategy:'+id).row().text('🏋️ Тренировочная программа','program:'+id).row().text('✏️ Редактировать','client:edit:'+id).row()
+  return new InlineKeyboard()
+    .text('🏋️ Выполнить тренировку','wr:program:'+id).row()
+    .text('🧩 Первичная оценка','assessment:'+id).row()
+    .text('🎯 Стратегия тренировок','strategy:'+id).row()
+    .text('🏋️ Тренировочная программа','program:'+id).row()
+    .text('✏️ Редактировать','client:edit:'+id).row()
     .text('🗑 Удалить клиента','client:delete:'+id).row()
-    .text('⬅️ К клиентам','clients').row().text('🏠 Главное меню','main');
+    .text('⬅️ К клиентам','clients').row()
+    .text('🏠 Главное меню','main');
 }
 async function showClient(ctx:Context,id:number) {
   const c=await getClient(id);
