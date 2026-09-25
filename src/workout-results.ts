@@ -292,6 +292,11 @@ export async function registerWorkoutResults(bot: Bot) {
     await ctx.answerCallbackQuery();
     await showDays(ctx, Number(ctx.match[1]));
   });
+  bot.callbackQuery(/^wr:days:(\d+)$/, async ctx => {
+    await ready();
+    await ctx.answerCallbackQuery();
+    await showDays(ctx, Number(ctx.match[1]));
+  });
   bot.callbackQuery(/^wr:day:(\d+):(\d+)$/, async ctx => {
     await ready();
     const clientId = Number(ctx.match[1]);
@@ -376,7 +381,7 @@ export async function registerWorkoutResults(bot: Bot) {
       const done = await finishSession(s.sessionId, t.toLowerCase() === 'нет' ? null : t);
       sessions.delete(ctx.from!.id);
       if (!done) return ctx.reply('❌ Тренировка уже завершена или не найдена.');
-      return render(ctx, '✅ <b>Тренировка сохранена</b>\\n\\nФактические результаты записаны.', new InlineKeyboard()
+      return render(ctx, '✅ <b>Тренировка сохранена</b>\n\nФактические результаты записаны.', new InlineKeyboard()
         .text('📚 История тренировок', 'wr:history:' + s.clientId).row()
         .text('🏋️ Новая тренировка', 'wr:client:' + s.clientId).row()
         .text('🏠 Главное меню', 'main'));
