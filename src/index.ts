@@ -17,6 +17,8 @@ if (!ADMIN_TELEGRAM_ID || !Number.isSafeInteger(Number(ADMIN_TELEGRAM_ID))) {
 const ADMIN_ID = Number(ADMIN_TELEGRAM_ID);
 
 const bot = new Bot(BOT_TOKEN);
+// Block 6 must register its text FSM before the general message:text handler.
+void registerWorkoutResults(bot);
 const addSessions = new Map<number, AddSession>();
 const editSessions = new Map<number, { clientId: number; field: keyof ClientDraft }>();
 type AssessmentDraft = Omit<PrimaryAssessment,'created_at'|'updated_at'>;
@@ -38,6 +40,7 @@ const LOCATIONS = [['🏠 Дом','loc:home'],['🏋️ Зал','loc:gym'],['�
 
 const MAIN_MENU = new InlineKeyboard()
   .text('👤 Клиенты','clients').row()
+  .text('🏋️ Выполнение тренировок','workouts').row()
   .text('📝 Заметки','notes');
 
 function isAdmin(ctx: Context) { return ctx.from?.id === ADMIN_ID; }
@@ -169,6 +172,7 @@ bot.command('start',async ctx=>{ addSessions.delete(ctx.from!.id); editSessions.
 bot.callbackQuery('main',async ctx=>{await ctx.answerCallbackQuery();addSessions.delete(ctx.from!.id);editSessions.delete(ctx.from!.id);await showMain(ctx);});
 bot.callbackQuery('notes',async ctx=>{await ctx.answerCallbackQuery();await render(ctx,'Этот раздел будет доступен на следующем этапе.',new InlineKeyboard().text('🏠 Главное меню','main'));});
 bot.callbackQuery('clients',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});
+bot.callbackQuery('workouts',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});
 bot.callbackQuery('workouts',async ctx=>{await ctx.answerCallbackQuery();await showClients(ctx);});
 bot.callbackQuery('client:add',async ctx=>{await ctx.answerCallbackQuery();addSessions.set(ctx.from.id,{step:'telegram_username',draft:{telegram_user_id:null, telegram_username:null, telegram_first_name:null, telegram_last_name:null, name:'Клиент'}});await promptAdd(ctx,addSessions.get(ctx.from.id)!);});
 bot.callbackQuery('telegram:skip',async ctx=>{const s=addSessions.get(ctx.from.id);if(!s||s.step!=='telegram_username')return;await ctx.answerCallbackQuery();s.draft.telegram_username=null;s.step='age';await promptAdd(ctx,s);});
@@ -699,7 +703,7 @@ async function startApp(){
     await migrateUpperLowerSpecializationTemplateSchema();
     await migrateFullBodyUpperLowerTemplateSchema();
     await migrateCanonicalTrainingProgramLibrary();
-    await registerWorkoutResults(bot);
+    // Block 6 handlers are registered at bot initialization so their text FSM runs before the catch-all handler.
     await logDatabaseDiagnostics();
     console.log('[BOT STARTUP] Telegram API verified; starting long polling');
     await bot.start({onStart:info=>console.log('Bot @'+info.username+' started')});
