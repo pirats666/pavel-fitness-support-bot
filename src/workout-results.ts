@@ -276,8 +276,7 @@ export async function registerWorkoutResults(bot: Bot) {
   };
 
   bot.command('workouts', async ctx => { await ready(); await showClients(ctx); });
-  bot.callbackQuery('wr:clients', async ctx => { await ctx.answerCallbackQuery(); await showClients(ctx); });
-    await ready();
+  bot.callbackQuery('wr:clients', async ctx => { await ready(); await ctx.answerCallbackQuery(); await showClients(ctx); });
   bot.callbackQuery(/^wr:client:(\d+)$/, async ctx => {
     await ready();
     await ctx.answerCallbackQuery();
@@ -366,9 +365,11 @@ export async function registerWorkoutResults(bot: Bot) {
     }
     await render(ctx, lines.join('\n'), new InlineKeyboard().text('⬅️ К клиенту', 'wr:client:' + Number(ctx.match[1])).row().text('🏠 Главное меню', 'main'));
   });
-  bot.on('message:text', async ctx => {
-    const s = sessions.get(ctx.from!.id);
-    if (!s?.step) return;
+  bot.on('message:text', async (ctx, next) => {
+    const uid = ctx.from!.id;
+    const s = sessions.get(uid);
+    if (!s?.step) return next();
+    console.log('[WORKOUT FSM] incoming', { user_id: uid, step: s.step, text: ctx.message.text });
     const t = ctx.message.text.trim();
     if (s.step === 'finish-comment') {
       if (t.startsWith('/')) return;
@@ -410,7 +411,12 @@ export async function registerWorkoutResults(bot: Bot) {
     }
     if (s.step === 'comment') {
       const comment = t.toLowerCase() === 'нет' ? null : t;
-      await addSet(s.exerciseSessionId, { ...s.pending!, comment });
+      try {
+        await addSet(s.exerciseSessionId, { ...s.pending!, comment });
+      } catch (e) {
+        console.error('[WORKOUT SET SAVE FAILED]', e);
+        return ctx.reply('❌ Не удалось сохранить подход. Попробуйте ещё раз.');
+      }
       const clientId = s.clientId;
       const sessionId = s.sessionId;
       sessions.delete(ctx.from!.id);
