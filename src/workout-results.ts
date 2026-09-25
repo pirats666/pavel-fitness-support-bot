@@ -163,6 +163,51 @@ async function sessionExercises(sessionId: number) {
   return rows;
 }
 
+async function previousExerciseSets(clientId: number, exerciseSessionId: number) {
+  const { rows: current } = await pool.query(
+    `SELECT source_exercise_id, name
+     FROM public.coach_workout_session_exercises
+     WHERE id = $1`,
+    [exerciseSessionId]
+  );
+  const currentRow = current[0];
+  if (!currentRow) return [];
+
+  const params: any[] = [clientId];
+  let match = '';
+  if (currentRow.source_exercise_id !== null) {
+    params.push(currentRow.source_exercise_id);
+    match = 'se.source_exercise_id = $2';
+  } else {
+    params.push(currentRow.name);
+    match = 'se.name = $2';
+  }
+
+  const { rows: latest } = await pool.query(
+    `SELECT s.id AS session_id
+     FROM public.coach_workout_sessions s
+     JOIN public.coach_workout_session_exercises se ON se.session_id = s.id
+     WHERE s.client_id = $1
+       AND s.completed_at IS NOT NULL
+       AND ${match}
+     ORDER BY s.completed_at DESC
+     LIMIT 1`,
+    params
+  );
+  if (!latest[0]) return [];
+
+  const { rows } = await pool.query(
+    `SELECT ws.weight_kg, ws.reps, ws.rir
+     FROM public.coach_workout_sets ws
+     JOIN public.coach_workout_session_exercises se ON se.id = ws.session_exercise_id
+     WHERE se.session_id = $1
+       AND ${match.replace('se.', 'se.')}
+     ORDER BY ws.set_number`,
+    [latest[0].session_id, params[1]]
+  );
+  return rows;
+}
+
 async function addSet(exerciseSessionId: number, data: { weightKg: number; reps: number; rir: number | null; comment: string | null }) {
   const next = await pool.query(
     'SELECT COALESCE(MAX(set_number),0)+1 AS n FROM public.coach_workout_sets WHERE session_exercise_id=$1',
@@ -334,8 +379,22 @@ export async function registerWorkoutResults(bot: Bot) {
     const sessionId = Number(ctx.match[2]);
     const exerciseSessionId = Number(ctx.match[3]);
     await ctx.answerCallbackQuery();
+    const previous = await previousExerciseSets(clientId, exerciseSessionId);
     sessions.set(ctx.from!.id, { clientId, sessionId, exerciseSessionId, step: 'weight' });
-    await render(ctx, '➕ <b>Новый фактический подход</b>\n\nВведите рабочий вес в кг.\n\nДля упражнения с собственным весом можно ввести 0.', new InlineKeyboard().text('❌ Отмена', 'wr:session:' + clientId + ':' + sessionId));
+    const lines = ['➕ <b>Новый фактический подход</b>', ''];
+    if (previous.length) {
+      lines.push('📌 <b>Прошлая тренировка:</b>');
+      previous.forEach((s: any, i: number) => {
+        const weight = Number(s.weight_kg);
+        const weightText = Number.isInteger(weight) ? String(weight) : weight.toString();
+        lines.push((i + 1) + '. ' + weightText + ' кг × ' + s.reps + (s.rir !== null ? ' · RIR ' + s.rir : ''));
+      });
+      lines.push('');
+    } else {
+      lines.push('📌 Предыдущих результатов нет.', '');
+    }
+    lines.push('Введите рабочий вес в кг.', '', 'Для упражнения с собственным весом можно ввести 0.');
+    await render(ctx, lines.join('\\n'), new InlineKeyboard().text('❌ Отмена', 'wr:session:' + clientId + ':' + sessionId));
   });
   bot.callbackQuery(/^wr:finish:(\d+):(\d+)$/, async ctx => {
     await ready();
